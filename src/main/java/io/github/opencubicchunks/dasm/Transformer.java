@@ -260,7 +260,6 @@ public class Transformer {
     }
 
     private ClassField remapField(ClassField clField) {
-
         Type mappedType = remapType(clField.owner);
         String mappedName = this.mappingsProvider.mapFieldName("intermediary",
                 clField.owner.getClassName(), clField.name, clField.desc.getDescriptor());
@@ -323,8 +322,7 @@ public class Transformer {
     }
 
     private Map<Handle, String> cloneAndApplyLambdaRedirects(ClassNode node, MethodNode method, Map<ClassMethod, String> methodRedirectsIn,
-                                                                    Map<ClassField, String> fieldRedirectsIn, Map<Type, Type> typeRedirectsIn) {
-
+                                                             Map<ClassField, String> fieldRedirectsIn, Map<Type, Type> typeRedirectsIn) {
         Map<Handle, String> lambdaRedirects = new HashMap<>();
         for (AbstractInsnNode instruction : method.instructions) {
             if (instruction.getOpcode() == INVOKEDYNAMIC) {
