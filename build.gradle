@@ -1,8 +1,9 @@
 plugins {
     id 'java'
+    id 'maven-publish'
 }
 
-group 'io.github.opencubicchunks.dasm'
+group 'io.github.opencubicchunks'
 version '1.0'
 
 repositories {
@@ -21,4 +22,16 @@ dependencies {
     implementation 'org.ow2.asm:asm-commons:9.1'
 
     implementation 'org.jetbrains:annotations:23.0.0'
+}
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            groupId = project.group
+            artifactId = project.name
+            version = project.version
+
+            from components.java
+        }
+    }
 }
