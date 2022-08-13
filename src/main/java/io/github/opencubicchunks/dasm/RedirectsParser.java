@@ -319,15 +319,15 @@ public class RedirectsParser {
             this.name = name;
         }
 
-        private void addRedirect(TypeRedirect redirect) {
+        public void addRedirect(TypeRedirect redirect) {
             this.typeRedirects.add(redirect);
         }
 
-        private void addRedirect(FieldRedirect redirect) {
+        public void addRedirect(FieldRedirect redirect) {
             this.fieldRedirects.add(redirect);
         }
 
-        private void addRedirect(MethodRedirect redirect) {
+        public void addRedirect(MethodRedirect redirect) {
             this.methodRedirects.add(redirect);
         }
 
