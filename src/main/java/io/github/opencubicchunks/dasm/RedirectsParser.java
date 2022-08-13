@@ -282,7 +282,7 @@ public class RedirectsParser {
         private final List<String> usesSets = new ArrayList<>();
         private final List<TargetMethod> targetMethods = new ArrayList<>();
 
-        ClassTarget(String className) {
+        public ClassTarget(String className) {
             this.className = className;
         }
 
@@ -307,7 +307,6 @@ public class RedirectsParser {
         }
 
         public record TargetMethod(String owner, String returnType, @Nullable String mappingsOwner, String srcMethodName, String dstMethodName, boolean makeSyntheticAccessor) { }
-
     }
 
     public static class RedirectSet {
