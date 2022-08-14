@@ -6,6 +6,19 @@ apply plugin: 'maven-publish'
 group 'com.github.OpenCubicChunks'
 version '1.0'
 
+test {
+    useJUnitPlatform()
+
+    // Always run tests, even when nothing changed.
+    dependsOn 'cleanTest'
+
+    // Show test results.
+    testLogging {
+        events "passed", "skipped", "failed"
+    }
+}
+
+
 repositories {
     mavenCentral()
 }
@@ -22,6 +35,10 @@ dependencies {
     implementation 'org.ow2.asm:asm-commons:9.1'
 
     implementation 'org.jetbrains:annotations:23.0.0'
+
+    testImplementation('org.junit.jupiter:junit-jupiter-api:5.9.0')
+    testImplementation('org.junit.jupiter:junit-jupiter-params:5.9.0')
+    testRuntimeOnly('org.junit.jupiter:junit-jupiter-engine:5.9.0')
 }
 
 publishing {

@@ -1,0 +1,13 @@
+{
+  "simpleSet": {
+    "typeRedirects": {
+      "typeRedirectIn": "typeRedirectOut"
+    },
+    "fieldRedirects": {
+      "owner#fieldRedirectIn;type": "fieldRedirectOut"
+    },
+    "methodRedirects": {
+      "owner#methodRedirectIn;type": "methodRedirectOut"
+    }
+  }
+}
