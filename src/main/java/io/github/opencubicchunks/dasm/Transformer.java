@@ -79,12 +79,21 @@ public class Transformer {
         target.getTargetMethods().forEach(targetMethod -> {
             String old = targetMethod.srcMethodName();
             String newName = targetMethod.dstMethodName();
-            MethodNode newMethod = cloneAndApplyRedirects(targetClass, new ClassMethod(getObjectType(targetMethod.owner()), getMethod(targetMethod.returnType() + " " + old)), newName,
-                    methodRedirects,
-                    fieldRedirects,
-                    typeRedirects);
+
+            MethodNode method;
+            if (targetMethod.shouldClone()) {
+                 method = cloneAndApplyRedirects(targetClass, new ClassMethod(getObjectType(targetMethod.owner()), getMethod(targetMethod.returnType() + " " + old)), newName,
+                        methodRedirects,
+                        fieldRedirects,
+                        typeRedirects);
+            } else {
+                method = applyRedirects(targetClass, new ClassMethod(getObjectType(targetMethod.owner()), getMethod(targetMethod.returnType() + " " + old)), newName,
+                        methodRedirects,
+                        fieldRedirects,
+                        typeRedirects);
+            }
             if (targetMethod.makeSyntheticAccessor()) {
-                makeStaticSyntheticAccessor(targetClass, newMethod);
+                makeStaticSyntheticAccessor(targetClass, method);
             }
         });
     }
@@ -115,11 +124,11 @@ public class Transformer {
                 + "into " + newName + " and applying remapping");
         Method existingMethod = remapMethod(existingMethodIn).method;
 
-        MethodNode m = node.methods.stream()
+        MethodNode originalMethod = node.methods.stream()
                 .filter(x -> existingMethod.getName().equals(x.name) && existingMethod.getDescriptor().equals(x.desc))
                 .findAny().orElseThrow(() -> new IllegalStateException("Target method " + existingMethod + " not found"));
 
-        Map<Handle, String> redirectedLambdas = cloneAndApplyLambdaRedirects(node, m, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn);
+        Map<Handle, String> redirectedLambdas = cloneAndApplyLambdaRedirects(node, originalMethod, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn);
 
         Set<String> defaultKnownClasses = Sets.newHashSet(
                 Type.getType(Object.class).getInternalName(),
@@ -216,7 +225,7 @@ public class Transformer {
                 return mapped;
             }
         };
-        String desc = m.desc;
+        String desc = originalMethod.desc;
         Type[] params = Type.getArgumentTypes(desc);
         Type ret = Type.getReturnType(desc);
         for (int i = 0; i < params.length; i++) {
@@ -235,7 +244,7 @@ public class Transformer {
             LOGGER.info("Copying code into existing method " + newName + " " + mappedDesc);
             output = existingOutput;
         } else {
-            output = new MethodNode(m.access, newName, mappedDesc, null, m.exceptions.toArray(new String[0]));
+            output = new MethodNode(originalMethod.access, newName, mappedDesc, null, originalMethod.exceptions.toArray(new String[0]));
         }
 
         MethodVisitor mv = new MethodVisitor(ASM7, output) {
@@ -245,7 +254,7 @@ public class Transformer {
         };
         MethodRemapper methodRemapper = new MethodRemapper(mv, remapper);
 
-        m.accept(methodRemapper);
+        originalMethod.accept(methodRemapper);
         output.name = newName;
         // remove protected and private, add public
         output.access &= ~(ACC_PROTECTED | ACC_PRIVATE);
@@ -253,6 +262,130 @@ public class Transformer {
         node.methods.add(output);
 
         return output;
+    }
+
+    private MethodNode applyRedirects(ClassNode node, ClassMethod existingMethodIn, String newName,
+                                                     Map<ClassMethod, String> methodRedirectsIn, Map<ClassField, String> fieldRedirectsIn, Map<Type, Type> typeRedirectsIn) {
+        LOGGER.info("Transforming " + node.name + ": Cloning method " + existingMethodIn.method.getName() + " " + existingMethodIn.method.getDescriptor() + " "
+                + "into " + newName + " and applying remapping");
+        Method existingMethod = remapMethod(existingMethodIn).method;
+
+        MethodNode originalMethod = node.methods.stream()
+                .filter(x -> existingMethod.getName().equals(x.name) && existingMethod.getDescriptor().equals(x.desc))
+                .findAny().orElseThrow(() -> new IllegalStateException("Target method " + existingMethod + " not found"));
+
+        Map<Handle, String> redirectedLambdas = cloneAndApplyLambdaRedirects(node, originalMethod, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn);
+
+        Set<String> defaultKnownClasses = Sets.newHashSet(
+                Type.getType(Object.class).getInternalName(),
+                Type.getType(String.class).getInternalName(),
+                node.name
+        );
+
+        Map<String, String> methodRedirects = new HashMap<>();
+        for (ClassMethod classMethodUnmapped : methodRedirectsIn.keySet()) {
+            ClassMethod classMethod = remapMethod(classMethodUnmapped);
+            methodRedirects.put(
+                    classMethod.owner.getInternalName() + "." + classMethod.method.getName() + classMethod.method.getDescriptor(),
+                    methodRedirectsIn.get(classMethodUnmapped)
+            );
+        }
+        for (Handle handle : redirectedLambdas.keySet()) {
+            methodRedirects.put(
+                    handle.getOwner() + "." + handle.getName() + handle.getDesc(),
+                    redirectedLambdas.get(handle)
+            );
+        }
+
+        Map<String, String> fieldRedirects = new HashMap<>();
+        for (ClassField classFieldUnmapped : fieldRedirectsIn.keySet()) {
+            ClassField classField = remapField(classFieldUnmapped);
+            fieldRedirects.put(
+                    classField.owner.getInternalName() + "." + classField.name,
+                    fieldRedirectsIn.get(classFieldUnmapped)
+            );
+        }
+
+        Map<String, String> typeRedirects = new HashMap<>();
+        for (Type type : typeRedirectsIn.keySet()) {
+            typeRedirects.put(remapType(type).getInternalName(), remapType(typeRedirectsIn.get(type)).getInternalName());
+        }
+
+        methodRedirects.forEach((old, n) -> LOGGER.info("Method mapping: " + old + " -> " + n));
+        fieldRedirects.forEach((old, n) -> LOGGER.info("Field mapping: " + old + " -> " + n));
+        typeRedirects.forEach((old, n) -> LOGGER.info("Type mapping: " + old + " -> " + n));
+
+        Remapper remapper = new Remapper() {
+            @Override
+            public String mapMethodName(final String owner, final String name, final String descriptor) {
+                if (name.equals("<init>")) {
+                    return name;
+                }
+                String key = owner + '.' + name + descriptor;
+                String mappedName = methodRedirects.get(key);
+                if (mappedName == null) {
+                    if (isDev) {
+                        LOGGER.warning("NOTE: handling METHOD redirect to self: " + key);
+                    }
+                    methodRedirects.put(key, name);
+                    return name;
+                }
+                return mappedName;
+            }
+
+            @Override
+            public String mapInvokeDynamicMethodName(final String name, final String descriptor) {
+                if (isDev) {
+                    LOGGER.warning("NOTE: remapping invokedynamic to self: " + name + "." + descriptor);
+                }
+                return name;
+            }
+
+            @Override
+            public String mapFieldName(final String owner, final String name, final String descriptor) {
+                String key = owner + '.' + name;
+                String mapped = fieldRedirects.get(key);
+                if (mapped == null) {
+                    if (isDev) {
+                        LOGGER.warning("NOTE: handling FIELD redirect to self: " + key);
+                    }
+                    fieldRedirects.put(key, name);
+                    return name;
+                }
+                return mapped;
+            }
+
+            @Override
+            public String map(final String key) {
+                String mapped = typeRedirects.get(key);
+                if (mapped == null && defaultKnownClasses.contains(key)) {
+                    mapped = key;
+                }
+                if (mapped == null) {
+                    if (isDev) {
+                        LOGGER.warning("NOTE: handling CLASS redirect to self: " + key);
+                    }
+                    typeRedirects.put(key, key);
+                    return key;
+                }
+                return mapped;
+            }
+        };
+
+        MethodVisitor mv = new MethodVisitor(ASM7, originalMethod) {
+            @Override public void visitLineNumber(int line, Label start) {
+                super.visitLineNumber(line + 10000, start);
+            }
+        };
+        MethodRemapper methodRemapper = new MethodRemapper(mv, remapper);
+
+        originalMethod.accept(methodRemapper);
+        originalMethod.name = newName;
+        // remove protected and private, add public
+        originalMethod.access &= ~(ACC_PROTECTED | ACC_PRIVATE);
+        originalMethod.access |= ACC_PUBLIC;
+
+        return originalMethod;
     }
 
     private static MethodNode findExistingMethod(ClassNode node, String name, String desc) {

@@ -22,6 +22,7 @@ public class RedirectsParser {
     private static final String FIELD_REDIRECTS_NAME = "fieldRedirects";
 
     private static final String MAKE_SYNTHETIC_ACCESSOR_NAME = "makeSyntheticAccessor";
+    private static final String SHOULD_CLONE_NAME = "shouldClone";
     private static final String MAPPINGS_OWNER_NAME = "mappingsOwner";
     private static final String DST_NAME = "newName";
 
@@ -113,7 +114,7 @@ public class RedirectsParser {
             JsonElement value = methodRedirect.getValue();
             if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
                 String dstMethodName = throwOnLengthZero(value.getAsString(), () -> String.format("Target method has zero length value for key %s", methodRedirect));
-                output.addTarget(new ClassTarget.TargetMethod(ownerName, returnType, null, srcMethodName, dstMethodName, false));
+                output.addTarget(new ClassTarget.TargetMethod(ownerName, returnType, null, srcMethodName, dstMethodName, true, false));
             } else if (value.isJsonObject()) { // target method might want a synthetic accessor
                 JsonObject targetMethodValue = value.getAsJsonObject();
 
@@ -128,9 +129,10 @@ public class RedirectsParser {
                 String dstMethodName = throwOnLengthZero(newNameNode.getAsString(), () -> String.format("Target method has zero length value for key %s", methodRedirect));
 
                 boolean makeSyntheticAccessor = getMakeSyntheticAccessorIfPresent(targetMethodValue);
+                boolean shouldClone = getShouldCloneIfPresent(targetMethodValue);
                 String mappingsOwner = getMappingsOwnerIfPresent(targetMethodValue);
 
-                output.addTarget(new ClassTarget.TargetMethod(ownerName, returnType, mappingsOwner, srcMethodName, dstMethodName, makeSyntheticAccessor));
+                output.addTarget(new ClassTarget.TargetMethod(ownerName, returnType, mappingsOwner, srcMethodName, dstMethodName, shouldClone, makeSyntheticAccessor));
             } else {
                 throw new RedirectsParseException(String.format("Could not parse Target method %s", methodRedirect));
             }
@@ -231,6 +233,18 @@ public class RedirectsParser {
         return makeSyntheticAccessor;
     }
 
+    private boolean getShouldCloneIfPresent(JsonObject redirectElement) throws RedirectsParseException {
+        boolean shouldClone = true;
+        if (redirectElement.has(SHOULD_CLONE_NAME)) { // synthetic accessor is optional
+            JsonElement syntheticAccessorNode = redirectElement.get(SHOULD_CLONE_NAME);
+            if (!syntheticAccessorNode.isJsonPrimitive() || !syntheticAccessorNode.getAsJsonPrimitive().isBoolean()) {
+                throw new RedirectsParseException(String.format("Redirect value does not contain a valid \"%s\". %s", SHOULD_CLONE_NAME, syntheticAccessorNode));
+            }
+            shouldClone = syntheticAccessorNode.getAsBoolean();
+        }
+        return shouldClone;
+    }
+
     private String getMappingsOwnerIfPresent(JsonObject targetMethodValue)
             throws RedirectsParseException {
         String mappingsOwner = null;
@@ -306,7 +320,8 @@ public class RedirectsParser {
             return Collections.unmodifiableList(targetMethods);
         }
 
-        public record TargetMethod(String owner, String returnType, @Nullable String mappingsOwner, String srcMethodName, String dstMethodName, boolean makeSyntheticAccessor) { }
+        public record TargetMethod(String owner, String returnType, @Nullable String mappingsOwner, String srcMethodName, String dstMethodName, boolean shouldClone, boolean makeSyntheticAccessor) {
+        }
     }
 
     public static class RedirectSet {
