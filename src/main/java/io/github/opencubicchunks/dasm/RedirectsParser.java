@@ -92,10 +92,12 @@ public class RedirectsParser {
                 }
             }
 
-            // it's possible the class target just wants to redirect fields and so has no target methods
+            // it's possible the class target to target the whole class, and so has no target methods
             if (classTargetNode.has(TARGET_METHODS_NAME) && classTargetNode.get(TARGET_METHODS_NAME).isJsonObject()) {
                 Set<Map.Entry<String, JsonElement>> targetMethodsNode = classTargetNode.get(TARGET_METHODS_NAME).getAsJsonObject().entrySet();
                 parseTargetMethods(classTarget, targetMethodsNode);
+            } else {
+                classTarget.targetWholeClass();
             }
 
             classTargets.add(classTarget);
@@ -295,6 +297,7 @@ public class RedirectsParser {
         private final String className;
         private final List<String> usesSets = new ArrayList<>();
         private final List<TargetMethod> targetMethods = new ArrayList<>();
+        private boolean wholeClass = false;
 
         public ClassTarget(String className) {
             this.className = className;
@@ -305,7 +308,20 @@ public class RedirectsParser {
         }
 
         public void addTarget(TargetMethod targetMethod) {
+            if (wholeClass) {
+                throw new IllegalStateException("Cannot add target methods when targeting whole class!");
+            }
             this.targetMethods.add(targetMethod);
+        }
+
+        /**
+         * Specifies targeting a whole class, without cloning methods. Allows in-place redirects for the whole class
+         */
+        public void targetWholeClass() {
+            if (!targetMethods.isEmpty()) {
+                throw new IllegalStateException("Cannot add target whole class when method targets are specified!");
+            }
+            wholeClass = true;
         }
 
         public String getClassName() {
@@ -314,6 +330,10 @@ public class RedirectsParser {
 
         public List<String> getSets() {
             return Collections.unmodifiableList(usesSets);
+        }
+
+        public boolean isWholeClass() {
+            return wholeClass;
         }
 
         public List<TargetMethod> getTargetMethods() {
