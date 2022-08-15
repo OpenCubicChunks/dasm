@@ -1,10 +1,6 @@
 package io.github.opencubicchunks.dasm;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Supplier;
 
 import com.google.gson.JsonArray;
@@ -340,8 +336,85 @@ public class RedirectsParser {
             return Collections.unmodifiableList(targetMethods);
         }
 
-        public record TargetMethod(String owner, String returnType, @Nullable String mappingsOwner, String srcMethodName, String dstMethodName, boolean shouldClone, boolean makeSyntheticAccessor) {
-        }
+        public static final class TargetMethod {
+            private final String owner;
+            private final String returnType;
+            private final @Nullable String mappingsOwner;
+            private final String srcMethodName;
+            private final String dstMethodName;
+            private final boolean shouldClone;
+            private final boolean makeSyntheticAccessor;
+
+            public TargetMethod(String owner, String returnType, @Nullable String mappingsOwner, String srcMethodName, String dstMethodName, boolean shouldClone, boolean makeSyntheticAccessor) {
+                this.owner = owner;
+                this.returnType = returnType;
+                this.mappingsOwner = mappingsOwner;
+                this.srcMethodName = srcMethodName;
+                this.dstMethodName = dstMethodName;
+                this.shouldClone = shouldClone;
+                this.makeSyntheticAccessor = makeSyntheticAccessor;
+            }
+
+            public String owner() {
+                return owner;
+            }
+
+            public String returnType() {
+                return returnType;
+            }
+
+            public @Nullable String mappingsOwner() {
+                return mappingsOwner;
+            }
+
+            public String srcMethodName() {
+                return srcMethodName;
+            }
+
+            public String dstMethodName() {
+                return dstMethodName;
+            }
+
+            public boolean shouldClone() {
+                return shouldClone;
+            }
+
+            public boolean makeSyntheticAccessor() {
+                return makeSyntheticAccessor;
+            }
+
+            @Override
+            public boolean equals(Object obj) {
+                if (obj == this) return true;
+                if (obj == null || obj.getClass() != this.getClass()) return false;
+                TargetMethod that = (TargetMethod) obj;
+                return Objects.equals(this.owner, that.owner) &&
+                        Objects.equals(this.returnType, that.returnType) &&
+                        Objects.equals(this.mappingsOwner, that.mappingsOwner) &&
+                        Objects.equals(this.srcMethodName, that.srcMethodName) &&
+                        Objects.equals(this.dstMethodName, that.dstMethodName) &&
+                        this.shouldClone == that.shouldClone &&
+                        this.makeSyntheticAccessor == that.makeSyntheticAccessor;
+            }
+
+            @Override
+            public int hashCode() {
+                return Objects.hash(owner, returnType, mappingsOwner, srcMethodName, dstMethodName, shouldClone, makeSyntheticAccessor);
+            }
+
+            @Override
+            public String toString() {
+                return "TargetMethod[" +
+                        "owner=" + owner + ", " +
+                        "returnType=" + returnType + ", " +
+                        "mappingsOwner=" + mappingsOwner + ", " +
+                        "srcMethodName=" + srcMethodName + ", " +
+                        "dstMethodName=" + dstMethodName + ", " +
+                        "shouldClone=" + shouldClone + ", " +
+                        "makeSyntheticAccessor=" + makeSyntheticAccessor + ']';
+            }
+
+                }
     }
 
     public static class RedirectSet {
@@ -382,8 +455,169 @@ public class RedirectsParser {
             return Collections.unmodifiableList(methodRedirects);
         }
 
-        public record TypeRedirect(String srcClassName, String dstClassName) { }
-        public record FieldRedirect(String owner, String fieldDesc, @Nullable String mappingsOwner, String srcFieldName, String dstFieldName) { }
-        public record MethodRedirect(String owner, String returnType, @Nullable String mappingsOwner, String srcMethodName, String dstMethodName) { }
+        public static final class TypeRedirect {
+            private final String srcClassName;
+            private final String dstClassName;
+
+            public TypeRedirect(String srcClassName, String dstClassName) {
+                this.srcClassName = srcClassName;
+                this.dstClassName = dstClassName;
+            }
+
+            public String srcClassName() {
+                return srcClassName;
+            }
+
+            public String dstClassName() {
+                return dstClassName;
+            }
+
+            @Override
+            public boolean equals(Object obj) {
+                if (obj == this) return true;
+                if (obj == null || obj.getClass() != this.getClass()) return false;
+                TypeRedirect that = (TypeRedirect) obj;
+                return Objects.equals(this.srcClassName, that.srcClassName) &&
+                        Objects.equals(this.dstClassName, that.dstClassName);
+            }
+
+            @Override
+            public int hashCode() {
+                return Objects.hash(srcClassName, dstClassName);
+            }
+
+            @Override
+            public String toString() {
+                return "TypeRedirect[" +
+                        "srcClassName=" + srcClassName + ", " +
+                        "dstClassName=" + dstClassName + ']';
+            }
+        }
+
+        public static final class FieldRedirect {
+            private final String owner;
+            private final String fieldDesc;
+            private final @Nullable String mappingsOwner;
+            private final String srcFieldName;
+            private final String dstFieldName;
+
+            public FieldRedirect(String owner, String fieldDesc, @Nullable String mappingsOwner, String srcFieldName, String dstFieldName) {
+                this.owner = owner;
+                this.fieldDesc = fieldDesc;
+                this.mappingsOwner = mappingsOwner;
+                this.srcFieldName = srcFieldName;
+                this.dstFieldName = dstFieldName;
+            }
+
+            public String owner() {
+                return owner;
+            }
+
+            public String fieldDesc() {
+                return fieldDesc;
+            }
+
+            public @Nullable String mappingsOwner() {
+                return mappingsOwner;
+            }
+
+            public String srcFieldName() {
+                return srcFieldName;
+            }
+
+            public String dstFieldName() {
+                return dstFieldName;
+            }
+
+            @Override
+            public boolean equals(Object obj) {
+                if (obj == this) return true;
+                if (obj == null || obj.getClass() != this.getClass()) return false;
+                FieldRedirect that = (FieldRedirect) obj;
+                return Objects.equals(this.owner, that.owner) &&
+                        Objects.equals(this.fieldDesc, that.fieldDesc) &&
+                        Objects.equals(this.mappingsOwner, that.mappingsOwner) &&
+                        Objects.equals(this.srcFieldName, that.srcFieldName) &&
+                        Objects.equals(this.dstFieldName, that.dstFieldName);
+            }
+
+            @Override
+            public int hashCode() {
+                return Objects.hash(owner, fieldDesc, mappingsOwner, srcFieldName, dstFieldName);
+            }
+
+            @Override
+            public String toString() {
+                return "FieldRedirect[" +
+                        "owner=" + owner + ", " +
+                        "fieldDesc=" + fieldDesc + ", " +
+                        "mappingsOwner=" + mappingsOwner + ", " +
+                        "srcFieldName=" + srcFieldName + ", " +
+                        "dstFieldName=" + dstFieldName + ']';
+            }
+        }
+
+        public static final class MethodRedirect {
+            private final String owner;
+            private final String returnType;
+            private final @Nullable String mappingsOwner;
+            private final String srcMethodName;
+            private final String dstMethodName;
+
+            public MethodRedirect(String owner, String returnType, @Nullable String mappingsOwner, String srcMethodName, String dstMethodName) {
+                this.owner = owner;
+                this.returnType = returnType;
+                this.mappingsOwner = mappingsOwner;
+                this.srcMethodName = srcMethodName;
+                this.dstMethodName = dstMethodName;
+            }
+
+            public String owner() {
+                return owner;
+            }
+
+            public String returnType() {
+                return returnType;
+            }
+
+            public @Nullable String mappingsOwner() {
+                return mappingsOwner;
+            }
+
+            public String srcMethodName() {
+                return srcMethodName;
+            }
+
+            public String dstMethodName() {
+                return dstMethodName;
+            }
+
+            @Override
+            public boolean equals(Object obj) {
+                if (obj == this) return true;
+                if (obj == null || obj.getClass() != this.getClass()) return false;
+                MethodRedirect that = (MethodRedirect) obj;
+                return Objects.equals(this.owner, that.owner) &&
+                        Objects.equals(this.returnType, that.returnType) &&
+                        Objects.equals(this.mappingsOwner, that.mappingsOwner) &&
+                        Objects.equals(this.srcMethodName, that.srcMethodName) &&
+                        Objects.equals(this.dstMethodName, that.dstMethodName);
+            }
+
+            @Override
+            public int hashCode() {
+                return Objects.hash(owner, returnType, mappingsOwner, srcMethodName, dstMethodName);
+            }
+
+            @Override
+            public String toString() {
+                return "MethodRedirect[" +
+                        "owner=" + owner + ", " +
+                        "returnType=" + returnType + ", " +
+                        "mappingsOwner=" + mappingsOwner + ", " +
+                        "srcMethodName=" + srcMethodName + ", " +
+                        "dstMethodName=" + dstMethodName + ']';
+            }
+        }
     }
 }

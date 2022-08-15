@@ -346,7 +346,8 @@ public class Transformer {
                 String bootstrapMethodOwner = invoke.bsm.getOwner();
                 if (bootstrapMethodName.equals("metafactory") && bootstrapMethodOwner.equals("java/lang/invoke/LambdaMetafactory")) {
                     for (Object bsmArg : invoke.bsmArgs) {
-                        if (bsmArg instanceof Handle handle) {
+                        if (bsmArg instanceof Handle) {
+                            Handle handle = (Handle) bsmArg;
                             String owner = handle.getOwner();
                             if (owner.equals(node.name)) {
                                 String newName = "cc$redirect$" + handle.getName();
