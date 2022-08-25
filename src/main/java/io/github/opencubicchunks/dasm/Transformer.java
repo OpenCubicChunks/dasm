@@ -56,11 +56,16 @@ public class Transformer {
             for (RedirectsParser.RedirectSet.MethodRedirect methodRedirect : redirectSet.getMethodRedirects()) {
                 if (methodRedirect.mappingsOwner() == null) {
                     methodRedirects.put(
-                            new ClassMethod(getObjectType(methodRedirect.owner()), getMethod(methodRedirect.returnType() + " " + methodRedirect.srcMethodName())),
+                            new ClassMethod(
+                                    getObjectType(methodRedirect.owner()),
+                                    getMethod(methodRedirect.returnType() + " " + methodRedirect.srcMethodName())),
                             methodRedirect.dstMethodName()
                     );
                 } else {
-                    methodRedirects.put(new ClassMethod(getObjectType(methodRedirect.owner()), getMethod(methodRedirect.srcMethodName()), getObjectType(methodRedirect.mappingsOwner())),
+                    methodRedirects.put(new ClassMethod(
+                                    getObjectType(methodRedirect.owner()),
+                                    getMethod(methodRedirect.returnType() + " " + methodRedirect.srcMethodName()),
+                                    getObjectType(methodRedirect.mappingsOwner())),
                             methodRedirect.dstMethodName()
                     );
                 }
