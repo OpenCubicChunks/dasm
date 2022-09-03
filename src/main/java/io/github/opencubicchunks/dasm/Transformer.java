@@ -435,7 +435,7 @@ public class Transformer {
             String mappedName = methodRedirects.get(key);
             if (mappedName == null) {
                 if (isDev) {
-                    LOGGER.warning("NOTE: handling METHOD redirect to self: " + key);
+                    LOGGER.info("NOTE: handling METHOD redirect to self: " + key);
                 }
                 methodRedirects.put(key, name);
                 return name;
@@ -446,7 +446,7 @@ public class Transformer {
         @Override
         public String mapInvokeDynamicMethodName(final String name, final String descriptor) {
             if (isDev) {
-                LOGGER.warning("NOTE: remapping invokedynamic to self: " + name + "." + descriptor);
+                LOGGER.info("NOTE: remapping invokedynamic to self: " + name + "." + descriptor);
             }
             return name;
         }
@@ -457,7 +457,7 @@ public class Transformer {
             String mapped = fieldRedirects.get(key);
             if (mapped == null) {
                 if (isDev) {
-                    LOGGER.warning("NOTE: handling FIELD redirect to self: " + key);
+                    LOGGER.info("NOTE: handling FIELD redirect to self: " + key);
                 }
                 fieldRedirects.put(key, name);
                 return name;
@@ -473,7 +473,7 @@ public class Transformer {
             }
             if (mapped == null) {
                 if (isDev) {
-                    LOGGER.warning("NOTE: handling CLASS redirect to self: " + key);
+                    LOGGER.info("NOTE: handling CLASS redirect to self: " + key);
                 }
                 typeRedirects.put(key, key);
                 return key;
