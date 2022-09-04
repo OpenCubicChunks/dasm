@@ -43,12 +43,6 @@ public class Transformer {
             }
 
             for (RedirectsParser.RedirectSet.FieldRedirect fieldRedirect : redirectSet.getFieldRedirects()) {
-//                //annoying syntax only on field
-//                String desc = fieldRedirect.fieldDesc();
-//                if (desc.length() > 1) { //not a primitive type
-//                    desc = "L" + desc;
-//                }
-//                desc = desc + ";";
                 fieldRedirects.put(fieldRedirect.field(), fieldRedirect.dstFieldName());
             }
 
@@ -68,14 +62,12 @@ public class Transformer {
                     method = cloneAndApplyRedirects(targetClass, targetMethod.method(), newName,
                             methodRedirects,
                             fieldRedirects,
-                            typeRedirects,
-                            false);
+                            typeRedirects);
                 } else {
                     method = applyRedirects(targetClass, targetMethod.method(), newName,
                             methodRedirects,
                             fieldRedirects,
-                            typeRedirects,
-                            false);
+                            typeRedirects);
                 }
                 if (targetMethod.makeSyntheticAccessor()) {
                     makeStaticSyntheticAccessor(targetClass, method);
@@ -105,11 +97,10 @@ public class Transformer {
     }
 
     private MethodNode cloneAndApplyRedirects(ClassNode node, ClassMethod existingMethodIn, String newName,
-                                              Map<ClassMethod, String> methodRedirectsIn, Map<ClassField, String> fieldRedirectsIn, Map<Type, Type> typeRedirectsIn,
-                                              boolean isLambda) {
+                                              Map<ClassMethod, String> methodRedirectsIn, Map<ClassField, String> fieldRedirectsIn, Map<Type, Type> typeRedirectsIn) {
         LOGGER.info("Transforming " + node.name + ": Cloning method " + existingMethodIn.method.getName() + " " + existingMethodIn.method.getDescriptor() + " "
                 + "into " + newName + " and applying remapping");
-        Method existingMethod = remapMethod(existingMethodIn, !isLambda).method;
+        Method existingMethod = remapMethod(existingMethodIn).method;
 
         MethodNode originalMethod = node.methods.stream()
                 .filter(x -> existingMethod.getName().equals(x.name) && existingMethod.getDescriptor().equals(x.desc))
@@ -167,11 +158,10 @@ public class Transformer {
     }
 
     private MethodNode applyRedirects(ClassNode node, ClassMethod existingMethodIn, String newName,
-                                      Map<ClassMethod, String> methodRedirectsIn, Map<ClassField, String> fieldRedirectsIn, Map<Type, Type> typeRedirectsIn,
-                                      boolean isLambda) {
+                                      Map<ClassMethod, String> methodRedirectsIn, Map<ClassField, String> fieldRedirectsIn, Map<Type, Type> typeRedirectsIn) {
         LOGGER.info("Transforming " + node.name + ": Cloning method " + existingMethodIn.method.getName() + " " + existingMethodIn.method.getDescriptor() + " "
                 + "into " + newName + " and applying remapping");
-        Method existingMethod = remapMethod(existingMethodIn, !isLambda).method;
+        Method existingMethod = remapMethod(existingMethodIn).method;
 
         MethodNode originalMethod = node.methods.stream()
                 .filter(x -> existingMethod.getName().equals(x.name) && existingMethod.getDescriptor().equals(x.desc))
@@ -277,19 +267,14 @@ public class Transformer {
         return new ClassField(mappedType, mappedName, mappedDesc);
     }
 
-    @NotNull private ClassMethod remapMethod(ClassMethod clMethod, boolean failHard) {
+    @NotNull private ClassMethod remapMethod(ClassMethod clMethod) {
         Type[] params = Type.getArgumentTypes(clMethod.method.getDescriptor());
         Type returnType = Type.getReturnType(clMethod.method.getDescriptor());
 
         Type mappedType = remapType(clMethod.owner);
         String mappedName = this.mappingsProvider.mapMethodName(clMethod.mappingOwner.getClassName(), clMethod.method.getName(), clMethod.method.getDescriptor());
         if (clMethod.method.getName().contains("method") && isDev && mappedName.equals(clMethod.method.getName())) {
-            // TODO: remove failHard, once lambdas have names
-            if (failHard) {
-                throw new Error("Fail! Mapping method " + clMethod.method.getName() + " failed in dev!");
-            } else {
-                LOGGER.warning("Fail! Mapping method " + clMethod.method.getName() + " failed in dev!");
-            }
+            throw new Error("Fail! Mapping method " + clMethod.method.getName() + " failed in dev!");
         }
         Type[] mappedParams = new Type[params.length];
         for (int i = 0; i < params.length; i++) {
@@ -350,7 +335,7 @@ public class Transformer {
                                 lambdaRedirects.put(handle, newName);
                                 cloneAndApplyRedirects(node, new ClassMethod(Type.getObjectType(handle.getOwner()),
                                                 new Method(handle.getName(), handle.getDesc())),
-                                        newName, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn, true);
+                                        newName, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn);
                             }
                         }
                     }
@@ -381,7 +366,7 @@ public class Transformer {
 
             this.methodRedirects = new HashMap<>();
             for (ClassMethod classMethodUnmapped : methodRedirectsIn.keySet()) {
-                ClassMethod classMethod = remapMethod(classMethodUnmapped, false);
+                ClassMethod classMethod = remapMethod(classMethodUnmapped);
                 methodRedirects.put(
                         classMethod.owner.getInternalName() + "." + classMethod.method.getName() + classMethod.method.getDescriptor(),
                         methodRedirectsIn.get(classMethodUnmapped)
