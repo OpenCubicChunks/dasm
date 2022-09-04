@@ -1,26 +1,22 @@
 package io.github.opencubicchunks.dasm;
 
-import static org.objectweb.asm.Opcodes.*;
-import static org.objectweb.asm.Type.ARRAY;
-import static org.objectweb.asm.Type.OBJECT;
-import static org.objectweb.asm.Type.getObjectType;
-import static org.objectweb.asm.Type.getType;
-import static org.objectweb.asm.commons.Method.getMethod;
+import com.google.common.collect.Sets;
+import org.jetbrains.annotations.NotNull;
+import org.objectweb.asm.Handle;
+import org.objectweb.asm.Label;
+import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Type;
+import org.objectweb.asm.commons.ClassRemapper;
+import org.objectweb.asm.commons.Method;
+import org.objectweb.asm.commons.MethodRemapper;
+import org.objectweb.asm.commons.Remapper;
+import org.objectweb.asm.tree.*;
 
 import java.util.*;
 import java.util.logging.Logger;
 
-import com.google.common.collect.Sets;
-import org.jetbrains.annotations.NotNull;
-import org.objectweb.asm.*;
-import org.objectweb.asm.commons.*;
-import org.objectweb.asm.tree.AbstractInsnNode;
-import org.objectweb.asm.tree.ClassNode;
-import org.objectweb.asm.tree.InsnNode;
-import org.objectweb.asm.tree.InvokeDynamicInsnNode;
-import org.objectweb.asm.tree.MethodInsnNode;
-import org.objectweb.asm.tree.MethodNode;
-import org.objectweb.asm.tree.VarInsnNode;
+import static org.objectweb.asm.Opcodes.*;
+import static org.objectweb.asm.Type.*;
 
 public class Transformer {
     private static final Logger LOGGER = Logger.getLogger(Transformer.class.getName());
@@ -40,35 +36,24 @@ public class Transformer {
 
         for (RedirectsParser.RedirectSet redirectSet : redirectSets) {
             for (RedirectsParser.RedirectSet.TypeRedirect typeRedirect : redirectSet.getTypeRedirects()) {
-                typeRedirects.put(getObjectType(typeRedirect.srcClassName()), getObjectType(typeRedirect.dstClassName()));
+                typeRedirects.put(
+                        getObjectType(mappingsProvider.mapClassName(typeRedirect.srcClassName())),
+                        getObjectType(mappingsProvider.mapClassName(typeRedirect.dstClassName()))
+                );
             }
 
             for (RedirectsParser.RedirectSet.FieldRedirect fieldRedirect : redirectSet.getFieldRedirects()) {
-                //annoying syntax only on field
-                String desc = fieldRedirect.fieldDesc();
-                if (desc.length() > 1) { //not a primitive type
-                    desc = "L" + desc;
-                }
-                desc = desc + ";";
-                fieldRedirects.put(new ClassField(fieldRedirect.owner(), fieldRedirect.srcFieldName(), desc), fieldRedirect.dstFieldName());
+//                //annoying syntax only on field
+//                String desc = fieldRedirect.fieldDesc();
+//                if (desc.length() > 1) { //not a primitive type
+//                    desc = "L" + desc;
+//                }
+//                desc = desc + ";";
+                fieldRedirects.put(fieldRedirect.field(), fieldRedirect.dstFieldName());
             }
 
             for (RedirectsParser.RedirectSet.MethodRedirect methodRedirect : redirectSet.getMethodRedirects()) {
-                if (methodRedirect.mappingsOwner() == null) {
-                    methodRedirects.put(
-                            new ClassMethod(
-                                    getObjectType(methodRedirect.owner()),
-                                    getMethod(methodRedirect.returnType() + " " + methodRedirect.srcMethodName())),
-                            methodRedirect.dstMethodName()
-                    );
-                } else {
-                    methodRedirects.put(new ClassMethod(
-                                    getObjectType(methodRedirect.owner()),
-                                    getMethod(methodRedirect.returnType() + " " + methodRedirect.srcMethodName()),
-                                    getObjectType(methodRedirect.mappingsOwner())),
-                            methodRedirect.dstMethodName()
-                    );
-                }
+                methodRedirects.put(methodRedirect.method(), methodRedirect.dstMethodName());
             }
         }
 
@@ -76,18 +61,17 @@ public class Transformer {
             applyWholeClassRedirects(targetClass, methodRedirects, fieldRedirects, typeRedirects);
         } else {
             target.getTargetMethods().forEach(targetMethod -> {
-                String old = targetMethod.srcMethodName();
                 String newName = targetMethod.dstMethodName();
 
                 MethodNode method;
                 if (targetMethod.shouldClone()) {
-                    method = cloneAndApplyRedirects(targetClass, new ClassMethod(getObjectType(targetMethod.owner()), getMethod(targetMethod.returnType() + " " + old)), newName,
+                    method = cloneAndApplyRedirects(targetClass, targetMethod.method(), newName,
                             methodRedirects,
                             fieldRedirects,
                             typeRedirects,
                             false);
                 } else {
-                    method = applyRedirects(targetClass, new ClassMethod(getObjectType(targetMethod.owner()), getMethod(targetMethod.returnType() + " " + old)), newName,
+                    method = applyRedirects(targetClass, targetMethod.method(), newName,
                             methodRedirects,
                             fieldRedirects,
                             typeRedirects,
@@ -285,8 +269,7 @@ public class Transformer {
 
     private ClassField remapField(ClassField clField) {
         Type mappedType = remapType(clField.owner);
-        String mappedName = this.mappingsProvider.mapFieldName("intermediary",
-                clField.owner.getClassName(), clField.name, clField.desc.getDescriptor());
+        String mappedName = this.mappingsProvider.mapFieldName(clField.owner.getClassName(), clField.name, clField.desc.getDescriptor());
         Type mappedDesc = remapDescType(clField.desc);
         if (clField.name.contains("field") && isDev && mappedName.equals(clField.name)) {
             throw new Error("Fail! Mapping field " + clField.name + " failed in dev!");
@@ -299,8 +282,7 @@ public class Transformer {
         Type returnType = Type.getReturnType(clMethod.method.getDescriptor());
 
         Type mappedType = remapType(clMethod.owner);
-        String mappedName = this.mappingsProvider.mapMethodName("intermediary",
-                clMethod.mappingOwner.getClassName(), clMethod.method.getName(), clMethod.method.getDescriptor());
+        String mappedName = this.mappingsProvider.mapMethodName(clMethod.mappingOwner.getClassName(), clMethod.method.getName(), clMethod.method.getDescriptor());
         if (clMethod.method.getName().contains("method") && isDev && mappedName.equals(clMethod.method.getName())) {
             // TODO: remove failHard, once lambdas have names
             if (failHard) {
@@ -333,7 +315,7 @@ public class Transformer {
         if (unmapped.endsWith(";")) {
             unmapped = unmapped.substring(1, unmapped.length() - 1);
         }
-        String mapped = this.mappingsProvider.mapClassName("intermediary", unmapped);
+        String mapped = this.mappingsProvider.mapClassName(unmapped);
         String mappedDesc = 'L' + mapped.replace('.', '/') + ';';
         if (unmapped.contains("class") && isDev && mapped.equals(unmapped)) {
             throw new Error("Fail! Mapping class " + unmapped + " failed in dev!");
@@ -343,7 +325,7 @@ public class Transformer {
 
     private Type remapType(Type t) {
         String unmapped = t.getClassName();
-        String mapped = this.mappingsProvider.mapClassName("intermediary", unmapped);
+        String mapped = this.mappingsProvider.mapClassName(unmapped);
         if (unmapped.contains("class") && isDev && mapped.equals(unmapped)) {
             throw new Error("Fail! Mapping class " + unmapped + " failed in dev!");
         }
@@ -482,19 +464,19 @@ public class Transformer {
         }
     }
 
-    private static final class ClassMethod {
-        final Type owner;
-        final Method method;
-        final Type mappingOwner;
+    public static final class ClassMethod {
+        public final Type owner;
+        public final Method method;
+        public final Type mappingOwner;
 
-        ClassMethod(Type owner, Method method) {
+        public ClassMethod(Type owner, Method method) {
             this.owner = owner;
             this.method = method;
             this.mappingOwner = owner;
         }
 
         // mapping owner because mappings owner may not be the same as in the call site
-        ClassMethod(Type owner, Method method, Type mappingOwner) {
+        public ClassMethod(Type owner, Method method, Type mappingOwner) {
             this.owner = owner;
             this.method = method;
             this.mappingOwner = mappingOwner;
@@ -520,18 +502,18 @@ public class Transformer {
         }
     }
 
-    private static final class ClassField {
-        final Type owner;
-        final String name;
-        final Type desc;
+    public static final class ClassField {
+        public final Type owner;
+        public final String name;
+        public final Type desc;
 
-        ClassField(String owner, String name, String desc) {
+        public ClassField(String owner, String name, String desc) {
             this.owner = getObjectType(owner);
             this.name = name;
             this.desc = getType(desc);
         }
 
-        ClassField(Type owner, String name, Type desc) {
+        public ClassField(Type owner, String name, Type desc) {
             this.owner = owner;
             this.name = name;
             this.desc = desc;

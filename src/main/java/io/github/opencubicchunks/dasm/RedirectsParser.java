@@ -6,9 +6,9 @@ import java.util.function.Supplier;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import org.apache.commons.lang3.tuple.ImmutableTriple;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.objectweb.asm.Type;
+import org.objectweb.asm.commons.Method;
 
 public class RedirectsParser {
     private static final String TARGET_METHODS_NAME = "targetMethods";
@@ -104,15 +104,17 @@ public class RedirectsParser {
 
     private void parseTargetMethods(ClassTarget output, Set<Map.Entry<String, JsonElement>> methodRedirects) throws RedirectsParseException {
         for (Map.Entry<String, JsonElement> methodRedirect : methodRedirects) {
-            ImmutableTriple<String, String, String> ownerIdentType = parseSignature(methodRedirect.getKey());
-            String ownerName = ownerIdentType.left;
-            String srcMethodName = ownerIdentType.middle;
-            String returnType = ownerIdentType.right;
+            Transformer.ClassMethod method = parseTargetMethodSignature(output.getClassName(), methodRedirect.getKey());
 
             JsonElement value = methodRedirect.getValue();
             if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
                 String dstMethodName = throwOnLengthZero(value.getAsString(), () -> String.format("Target method has zero length value for key %s", methodRedirect));
-                output.addTarget(new ClassTarget.TargetMethod(ownerName, returnType, null, srcMethodName, dstMethodName, true, false));
+                output.addTarget(new ClassTarget.TargetMethod(
+                        method,
+                        dstMethodName,
+                        true,
+                        false)
+                );
             } else if (value.isJsonObject()) { // target method might want a synthetic accessor
                 JsonObject targetMethodValue = value.getAsJsonObject();
 
@@ -130,7 +132,12 @@ public class RedirectsParser {
                 boolean shouldClone = getShouldCloneIfPresent(targetMethodValue);
                 String mappingsOwner = getMappingsOwnerIfPresent(targetMethodValue);
 
-                output.addTarget(new ClassTarget.TargetMethod(ownerName, returnType, mappingsOwner, srcMethodName, dstMethodName, shouldClone, makeSyntheticAccessor));
+                output.addTarget(new ClassTarget.TargetMethod(
+                        new Transformer.ClassMethod(method.owner, method.method, mappingsOwner == null ? method.owner : getTypeFromName(mappingsOwner)),
+                        dstMethodName,
+                        shouldClone,
+                        makeSyntheticAccessor)
+                );
             } else {
                 throw new RedirectsParseException(String.format("Could not parse Target method %s", methodRedirect));
             }
@@ -152,18 +159,12 @@ public class RedirectsParser {
 
     private void parseFieldRedirects(RedirectSet output, Set<Map.Entry<String, JsonElement>> fieldRedirects) throws RedirectsParseException {
         for (Map.Entry<String, JsonElement> fieldRedirect : fieldRedirects) {
-            ImmutableTriple<String, String, String> ownerIdentType = parseSignature(fieldRedirect.getKey());
-            String ownerName = ownerIdentType.left;
-            String srcFieldName = ownerIdentType.middle;
-            String fieldType = ownerIdentType.right;
+            Transformer.ClassField field = parseFieldSignature(fieldRedirect.getKey());
 
             JsonElement value = fieldRedirect.getValue();
             if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
                 output.addRedirect(new RedirectSet.FieldRedirect(
-                        ownerName,
-                        fieldType,
-                        null,
-                        srcFieldName,
+                        field,
                         throwOnLengthZero(value.getAsString(), () -> String.format("Field redirect has zero length string value: %s", fieldRedirect))
                 ));
             } else if (value.isJsonObject()) { // field redirect might contain a mappings owner
@@ -178,9 +179,9 @@ public class RedirectsParser {
                 }
 
                 String dstFieldName = throwOnLengthZero(newNameNode.getAsString(), () -> String.format("Field redirect has zero length value for key %s", fieldRedirect));
-                String mappingsOwner = getMappingsOwnerIfPresent(fieldRedirectValue);
+                String mappingsOwner = getMappingsOwnerIfPresent(fieldRedirectValue); //TODO: support if required at some point
 
-                output.addRedirect(new RedirectSet.FieldRedirect(ownerName, fieldType, mappingsOwner, srcFieldName, dstFieldName));
+                output.addRedirect(new RedirectSet.FieldRedirect(field, dstFieldName));
             } else {
                 throw new RedirectsParseException(String.format("Field redirect value has invalid structure: %s", value));
             }
@@ -189,15 +190,12 @@ public class RedirectsParser {
 
     private void parseMethodRedirects(RedirectSet output, Set<Map.Entry<String, JsonElement>> methodRedirects) throws RedirectsParseException {
         for (Map.Entry<String, JsonElement> methodRedirect : methodRedirects) {
-            ImmutableTriple<String, String, String> ownerIdentType = parseSignature(methodRedirect.getKey());
-            String ownerName = ownerIdentType.left;
-            String srcMethodName = ownerIdentType.middle;
-            String returnType = ownerIdentType.right;
+            Transformer.ClassMethod method = parseMethodSignature(methodRedirect.getKey());
 
             JsonElement value = methodRedirect.getValue();
             if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
                 String dstMethodName = throwOnLengthZero(value.getAsString(), () -> String.format("Method redirect has zero length value for key %s", methodRedirect));
-                output.addRedirect(new RedirectSet.MethodRedirect(ownerName, returnType, null, srcMethodName, dstMethodName));
+                output.addRedirect(new RedirectSet.MethodRedirect(method, dstMethodName));
             } else if (value.isJsonObject()) { // method redirect might contain a mappings owner
                 JsonObject methodRedirectValue = value.getAsJsonObject();
 
@@ -212,7 +210,14 @@ public class RedirectsParser {
                 String dstMethodName = throwOnLengthZero(newNameNode.getAsString(), () -> String.format("Method redirect has zero length value for key %s", methodRedirect));
                 String mappingsOwner = getMappingsOwnerIfPresent(methodRedirectValue);
 
-                output.addRedirect(new RedirectSet.MethodRedirect(ownerName, returnType, mappingsOwner, srcMethodName, dstMethodName));
+                output.addRedirect(new RedirectSet.MethodRedirect(
+                        new Transformer.ClassMethod(
+                                method.owner,
+                                method.method,
+                                mappingsOwner == null ? method.owner : getTypeFromName(mappingsOwner)
+                        ),
+                        dstMethodName
+                ));
             } else {
                 throw new RedirectsParseException(String.format("Could not parse Method redirect %s", methodRedirect));
             }
@@ -258,28 +263,55 @@ public class RedirectsParser {
     }
 
     /**
-     * Accepts signature like owner#ident;type
-     * <p>eg: {@code net.minecraft.world.level.chunk.LevelChunk#sections;net.minecraft.world.level.chunk.LevelChunkSection}</p>
+     * Accepts signature like {@code owner#type ident}
+     * <p>eg: {@code net.minecraft.world.level.chunk.LevelChunkSection sections}</p>
      */
-    public static ImmutableTriple<String, String, String> parseSignature(String in) throws RedirectsParseException {
+    public static Transformer.ClassMethod parseTargetMethodSignature(String owner, String in) throws RedirectsParseException {
         String s = throwOnLengthZero(in, () -> "Signature has zero length");
 
-        int ownerToIdentSeparator = s.lastIndexOf("#");
-        int identToTypeSeparator = s.lastIndexOf(";");
+        try {
+            Method method = Method.getMethod(s);
 
-        if (ownerToIdentSeparator == -1 || identToTypeSeparator == -1 || ownerToIdentSeparator >= identToTypeSeparator) {
-            // key contained no # symbol or no ; symbol, or they were in the wrong order
-            throw new RedirectsParseException(String.format("Invalid \"owner#ident;type\" signature: %s", s));
+            return new Transformer.ClassMethod(getTypeFromName(owner), method);
+        } catch (IllegalArgumentException e) {
+            throw new RedirectsParseException(String.format("Could not parse signature %s", s), e);
         }
+    }
 
-        String owner = throwOnLengthZero(s.substring(0, ownerToIdentSeparator),
-                () -> String.format("Invalid \"owner#ident;type\" signature: %s", s));
-        String ident = throwOnLengthZero(s.substring(ownerToIdentSeparator + 1, identToTypeSeparator),
-                () -> String.format("Invalid \"owner#ident;type\" signature: %s", s));
-        String type = throwOnLengthZero(s.substring(identToTypeSeparator + 1, s.length()),
-                () -> String.format("Invalid \"owner#ident;type\" signature: %s", s));
+    /**
+     * Accepts signature like {@code owner#type ident}
+     * <p>eg: {@code net.minecraft.world.level.chunk.LevelChunk | net.minecraft.world.level.chunk.LevelChunkSection sections}</p>
+     */
+    public static Transformer.ClassMethod parseMethodSignature(String in) throws RedirectsParseException {
+        String s = throwOnLengthZero(in, () -> "Signature has zero length");
 
-        return new ImmutableTriple<>(owner, ident, type);
+        try {
+            String[] split = requireLengthN(s.split(" ?\\| ?"), 2, () -> String.format("Invalid signature, \"%s\" didnt have a `|`. Expected signature like: OWNER | RETURNTYPE IDENT", in));
+
+            Method method = Method.getMethod(split[1]);
+
+            return new Transformer.ClassMethod(getTypeFromName(split[0]), method);
+        } catch (IllegalArgumentException e) {
+            throw new RedirectsParseException(String.format("Could not parse signature %s", s), e);
+        }
+    }
+
+    /**
+     * Accepts signature like {@code owner#type ident}
+     * <p>eg: {@code net.minecraft.world.level.chunk.LevelChunk | net.minecraft.world.level.chunk.LevelChunkSection sections}</p>
+     */
+    public static Transformer.ClassField parseFieldSignature(String in) throws RedirectsParseException {
+        String s = throwOnLengthZero(in, () -> "Signature has zero length");
+
+        try {
+            String[] split = requireLengthN(s.split(" ?\\| ?"), 2, () -> String.format("Invalid signature, \"%s\" didnt have a `|`. Expected signature like: OWNER | RETURNTYPE IDENT", in));
+
+            String[] typeIdentSplit = split[1].split(" ");
+
+            return new Transformer.ClassField(getTypeFromName(split[0]), typeIdentSplit[1], getTypeFromName(typeIdentSplit[0]));
+        } catch (IllegalArgumentException e) {
+            throw new RedirectsParseException(String.format("Could not parse signature %s", s), e);
+        }
     }
 
     private static String throwOnLengthZero(String string, Supplier<String> message) throws RedirectsParseException {
@@ -287,6 +319,24 @@ public class RedirectsParser {
             throw new RedirectsParseException(message.get());
         }
         return string;
+    }
+
+    private static <T> T[] requireLengthN(T[] array, int requiredLength, Supplier<String> message) throws RedirectsParseException {
+        if (array.length != requiredLength) {
+            throw new RedirectsParseException(message.get());
+        }
+        return array;
+    }
+
+    /**
+     * @param typeName Expected without generics in format:<p>
+     *     {@code the.package.name.Class}<p>
+     *     {@code int}<p>
+     *     {@code int[]}<p>
+     *     {@code the.package.name.Class[]}<p>
+     */
+    private static Type getTypeFromName(String typeName) {
+        return Method.getMethod(typeName + " x()").getReturnType();
     }
 
     public static class ClassTarget {
@@ -337,38 +387,16 @@ public class RedirectsParser {
         }
 
         public static final class TargetMethod {
-            private final String owner;
-            private final String returnType;
-            private final @Nullable String mappingsOwner;
-            private final String srcMethodName;
+            private final Transformer.ClassMethod method;
             private final String dstMethodName;
             private final boolean shouldClone;
             private final boolean makeSyntheticAccessor;
 
-            public TargetMethod(String owner, String returnType, @Nullable String mappingsOwner, String srcMethodName, String dstMethodName, boolean shouldClone, boolean makeSyntheticAccessor) {
-                this.owner = owner;
-                this.returnType = returnType;
-                this.mappingsOwner = mappingsOwner;
-                this.srcMethodName = srcMethodName;
+            public TargetMethod(Transformer.ClassMethod method, String dstMethodName, boolean shouldClone, boolean makeSyntheticAccessor) {
+                this.method = method;
                 this.dstMethodName = dstMethodName;
                 this.shouldClone = shouldClone;
                 this.makeSyntheticAccessor = makeSyntheticAccessor;
-            }
-
-            public String owner() {
-                return owner;
-            }
-
-            public String returnType() {
-                return returnType;
-            }
-
-            public @Nullable String mappingsOwner() {
-                return mappingsOwner;
-            }
-
-            public String srcMethodName() {
-                return srcMethodName;
             }
 
             public String dstMethodName() {
@@ -383,38 +411,33 @@ public class RedirectsParser {
                 return makeSyntheticAccessor;
             }
 
-            @Override
-            public boolean equals(Object obj) {
-                if (obj == this) return true;
-                if (obj == null || obj.getClass() != this.getClass()) return false;
-                TargetMethod that = (TargetMethod) obj;
-                return Objects.equals(this.owner, that.owner) &&
-                        Objects.equals(this.returnType, that.returnType) &&
-                        Objects.equals(this.mappingsOwner, that.mappingsOwner) &&
-                        Objects.equals(this.srcMethodName, that.srcMethodName) &&
-                        Objects.equals(this.dstMethodName, that.dstMethodName) &&
-                        this.shouldClone == that.shouldClone &&
-                        this.makeSyntheticAccessor == that.makeSyntheticAccessor;
-            }
-
-            @Override
-            public int hashCode() {
-                return Objects.hash(owner, returnType, mappingsOwner, srcMethodName, dstMethodName, shouldClone, makeSyntheticAccessor);
+            public Transformer.ClassMethod method() {
+                return this.method;
             }
 
             @Override
             public String toString() {
-                return "TargetMethod[" +
-                        "owner=" + owner + ", " +
-                        "returnType=" + returnType + ", " +
-                        "mappingsOwner=" + mappingsOwner + ", " +
-                        "srcMethodName=" + srcMethodName + ", " +
-                        "dstMethodName=" + dstMethodName + ", " +
-                        "shouldClone=" + shouldClone + ", " +
-                        "makeSyntheticAccessor=" + makeSyntheticAccessor + ']';
+                return "TargetMethod{" +
+                        "method=" + method +
+                        ", dstMethodName='" + dstMethodName + '\'' +
+                        ", shouldClone=" + shouldClone +
+                        ", makeSyntheticAccessor=" + makeSyntheticAccessor +
+                        '}';
             }
 
-                }
+            @Override
+            public boolean equals(Object o) {
+                if (this == o) return true;
+                if (o == null || getClass() != o.getClass()) return false;
+                TargetMethod that = (TargetMethod) o;
+                return shouldClone == that.shouldClone && makeSyntheticAccessor == that.makeSyntheticAccessor && Objects.equals(method, that.method) && Objects.equals(dstMethodName, that.dstMethodName);
+            }
+
+            @Override
+            public int hashCode() {
+                return Objects.hash(method, dstMethodName, shouldClone, makeSyntheticAccessor);
+            }
+        }
     }
 
     public static class RedirectSet {
@@ -495,34 +518,16 @@ public class RedirectsParser {
         }
 
         public static final class FieldRedirect {
-            private final String owner;
-            private final String fieldDesc;
-            private final @Nullable String mappingsOwner;
-            private final String srcFieldName;
+            private final Transformer.ClassField field;
             private final String dstFieldName;
 
-            public FieldRedirect(String owner, String fieldDesc, @Nullable String mappingsOwner, String srcFieldName, String dstFieldName) {
-                this.owner = owner;
-                this.fieldDesc = fieldDesc;
-                this.mappingsOwner = mappingsOwner;
-                this.srcFieldName = srcFieldName;
+            public FieldRedirect(Transformer.ClassField field, String dstFieldName) {
+                this.field = field;
                 this.dstFieldName = dstFieldName;
             }
 
-            public String owner() {
-                return owner;
-            }
-
-            public String fieldDesc() {
-                return fieldDesc;
-            }
-
-            public @Nullable String mappingsOwner() {
-                return mappingsOwner;
-            }
-
-            public String srcFieldName() {
-                return srcFieldName;
+            public Transformer.ClassField field() {
+                return field;
             }
 
             public String dstFieldName() {
@@ -530,62 +535,38 @@ public class RedirectsParser {
             }
 
             @Override
-            public boolean equals(Object obj) {
-                if (obj == this) return true;
-                if (obj == null || obj.getClass() != this.getClass()) return false;
-                FieldRedirect that = (FieldRedirect) obj;
-                return Objects.equals(this.owner, that.owner) &&
-                        Objects.equals(this.fieldDesc, that.fieldDesc) &&
-                        Objects.equals(this.mappingsOwner, that.mappingsOwner) &&
-                        Objects.equals(this.srcFieldName, that.srcFieldName) &&
-                        Objects.equals(this.dstFieldName, that.dstFieldName);
+            public String toString() {
+                return "FieldRedirect{" +
+                        "field=" + field +
+                        ", dstFieldName='" + dstFieldName + '\'' +
+                        '}';
+            }
+
+            @Override
+            public boolean equals(Object o) {
+                if (this == o) return true;
+                if (o == null || getClass() != o.getClass()) return false;
+                FieldRedirect that = (FieldRedirect) o;
+                return Objects.equals(field, that.field) && Objects.equals(dstFieldName, that.dstFieldName);
             }
 
             @Override
             public int hashCode() {
-                return Objects.hash(owner, fieldDesc, mappingsOwner, srcFieldName, dstFieldName);
-            }
-
-            @Override
-            public String toString() {
-                return "FieldRedirect[" +
-                        "owner=" + owner + ", " +
-                        "fieldDesc=" + fieldDesc + ", " +
-                        "mappingsOwner=" + mappingsOwner + ", " +
-                        "srcFieldName=" + srcFieldName + ", " +
-                        "dstFieldName=" + dstFieldName + ']';
+                return Objects.hash(field, dstFieldName);
             }
         }
 
         public static final class MethodRedirect {
-            private final String owner;
-            private final String returnType;
-            private final @Nullable String mappingsOwner;
-            private final String srcMethodName;
+            private final Transformer.ClassMethod method;
             private final String dstMethodName;
 
-            public MethodRedirect(String owner, String returnType, @Nullable String mappingsOwner, String srcMethodName, String dstMethodName) {
-                this.owner = owner;
-                this.returnType = returnType;
-                this.mappingsOwner = mappingsOwner;
-                this.srcMethodName = srcMethodName;
+            public MethodRedirect(Transformer.ClassMethod method, String dstMethodName) {
+                this.method = method;
                 this.dstMethodName = dstMethodName;
             }
 
-            public String owner() {
-                return owner;
-            }
-
-            public String returnType() {
-                return returnType;
-            }
-
-            public @Nullable String mappingsOwner() {
-                return mappingsOwner;
-            }
-
-            public String srcMethodName() {
-                return srcMethodName;
+            public Transformer.ClassMethod method() {
+                return method;
             }
 
             public String dstMethodName() {
@@ -593,30 +574,24 @@ public class RedirectsParser {
             }
 
             @Override
-            public boolean equals(Object obj) {
-                if (obj == this) return true;
-                if (obj == null || obj.getClass() != this.getClass()) return false;
-                MethodRedirect that = (MethodRedirect) obj;
-                return Objects.equals(this.owner, that.owner) &&
-                        Objects.equals(this.returnType, that.returnType) &&
-                        Objects.equals(this.mappingsOwner, that.mappingsOwner) &&
-                        Objects.equals(this.srcMethodName, that.srcMethodName) &&
-                        Objects.equals(this.dstMethodName, that.dstMethodName);
+            public String toString() {
+                return "MethodRedirect{" +
+                        "method=" + method +
+                        ", dstMethodName='" + dstMethodName + '\'' +
+                        '}';
+            }
+
+            @Override
+            public boolean equals(Object o) {
+                if (this == o) return true;
+                if (o == null || getClass() != o.getClass()) return false;
+                MethodRedirect that = (MethodRedirect) o;
+                return Objects.equals(method, that.method) && Objects.equals(dstMethodName, that.dstMethodName);
             }
 
             @Override
             public int hashCode() {
-                return Objects.hash(owner, returnType, mappingsOwner, srcMethodName, dstMethodName);
-            }
-
-            @Override
-            public String toString() {
-                return "MethodRedirect[" +
-                        "owner=" + owner + ", " +
-                        "returnType=" + returnType + ", " +
-                        "mappingsOwner=" + mappingsOwner + ", " +
-                        "srcMethodName=" + srcMethodName + ", " +
-                        "dstMethodName=" + dstMethodName + ']';
+                return Objects.hash(method, dstMethodName);
             }
         }
     }

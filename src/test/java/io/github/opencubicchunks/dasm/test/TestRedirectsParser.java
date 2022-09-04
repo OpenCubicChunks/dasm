@@ -44,21 +44,21 @@ public class TestRedirectsParser {
         assertEquals(1, set.getMethodRedirects().size());
 
         FieldRedirect fieldRedirect = set.getFieldRedirects().get(0);
-        assertEquals("owner", fieldRedirect.owner());
-        assertEquals("type", fieldRedirect.fieldDesc());
-        assertEquals("fieldRedirectIn", fieldRedirect.srcFieldName());
+        assertTrue(fieldRedirect.field().owner.getClassName().contains("owner"));
+        assertTrue(fieldRedirect.field().desc.getClassName().contains("type"));
+        assertTrue(fieldRedirect.field().name.contains("fieldRedirectIn"));
         assertEquals("fieldRedirectOut", fieldRedirect.dstFieldName());
-        assertNull(fieldRedirect.mappingsOwner());
+        // assertNull(fieldRedirect.field().mappingsOwner()); // TODO: readd if field mappingsOwners are added
 
         TypeRedirect typeRedirect = set.getTypeRedirects().get(0);
         assertEquals("typeRedirectIn", typeRedirect.srcClassName());
         assertEquals("typeRedirectOut", typeRedirect.dstClassName());
 
         MethodRedirect methodRedirect = set.getMethodRedirects().get(0);
-        assertEquals("owner", methodRedirect.owner());
-        assertEquals("type", methodRedirect.returnType());
-        assertEquals("methodRedirectIn", methodRedirect.srcMethodName());
+        assertTrue(methodRedirect.method().owner.getClassName().contains("owner"));
+        assertTrue(methodRedirect.method().method.getReturnType().getClassName().contains("type"));
+        assertTrue(methodRedirect.method().method.getName().contains("methodRedirectIn"));
         assertEquals("methodRedirectOut", methodRedirect.dstMethodName());
-        assertNull(methodRedirect.mappingsOwner());
+        assertTrue(methodRedirect.method().mappingOwner.getClassName().contains("owner"));
     }
 }

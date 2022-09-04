@@ -4,10 +4,10 @@
       "typeRedirectIn": "typeRedirectOut"
     },
     "fieldRedirects": {
-      "owner#fieldRedirectIn;type": "fieldRedirectOut"
+      "owner | type fieldRedirectIn": "fieldRedirectOut"
     },
     "methodRedirects": {
-      "owner#methodRedirectIn;type": "methodRedirectOut"
+      "owner | type methodRedirectIn()": "methodRedirectOut"
     }
   }
 }
