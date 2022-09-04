@@ -364,7 +364,7 @@ public class Transformer {
                             Handle handle = (Handle) bsmArg;
                             String owner = handle.getOwner();
                             if (owner.equals(node.name)) {
-                                String newName = "cc$redirect$" + handle.getName();
+                                String newName = "dasm$redirect$" + handle.getName();
                                 lambdaRedirects.put(handle, newName);
                                 cloneAndApplyRedirects(node, new ClassMethod(Type.getObjectType(handle.getOwner()),
                                                 new Method(handle.getName(), handle.getDesc())),
