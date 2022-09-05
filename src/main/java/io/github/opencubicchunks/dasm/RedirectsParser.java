@@ -225,23 +225,19 @@ public class RedirectsParser {
     }
 
     private boolean getMakeSyntheticAccessorIfPresent(JsonObject redirectElement) throws RedirectsParseException {
-        boolean makeSyntheticAccessor = false;
-        if (redirectElement.has(MAKE_SYNTHETIC_ACCESSOR_NAME)) { // synthetic accessor is optional
-            JsonElement syntheticAccessorNode = redirectElement.get(MAKE_SYNTHETIC_ACCESSOR_NAME);
-            if (!syntheticAccessorNode.isJsonPrimitive() || !syntheticAccessorNode.getAsJsonPrimitive().isBoolean()) {
-                throw new RedirectsParseException(String.format("Redirect value does not contain a valid \"%s\". %s", MAKE_SYNTHETIC_ACCESSOR_NAME, syntheticAccessorNode));
-            }
-            makeSyntheticAccessor = syntheticAccessorNode.getAsBoolean();
-        }
-        return makeSyntheticAccessor;
+        return getBooleanIfPresent(redirectElement, MAKE_SYNTHETIC_ACCESSOR_NAME, false);
     }
 
     private boolean getShouldCloneIfPresent(JsonObject redirectElement) throws RedirectsParseException {
-        boolean shouldClone = true;
-        if (redirectElement.has(SHOULD_CLONE_NAME)) { // synthetic accessor is optional
-            JsonElement syntheticAccessorNode = redirectElement.get(SHOULD_CLONE_NAME);
+        return getBooleanIfPresent(redirectElement, SHOULD_CLONE_NAME, true);
+    }
+
+    private boolean getBooleanIfPresent(JsonObject object, String name, boolean defaultValue) throws RedirectsParseException {
+        boolean shouldClone = defaultValue;
+        if (object.has(name)) { // synthetic accessor is optional
+            JsonElement syntheticAccessorNode = object.get(name);
             if (!syntheticAccessorNode.isJsonPrimitive() || !syntheticAccessorNode.getAsJsonPrimitive().isBoolean()) {
-                throw new RedirectsParseException(String.format("Redirect value does not contain a valid \"%s\". %s", SHOULD_CLONE_NAME, syntheticAccessorNode));
+                throw new RedirectsParseException(String.format("Redirect value does not contain a valid \"%s\". %s", name, syntheticAccessorNode));
             }
             shouldClone = syntheticAccessorNode.getAsBoolean();
         }
