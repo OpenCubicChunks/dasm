@@ -11,6 +11,8 @@ import org.objectweb.asm.Type;
 import org.objectweb.asm.commons.Method;
 
 public class RedirectsParser {
+    private static final String DEFAULT_SETS_NAME = "defaultSets";
+    private static final String TARGETS_NAME = "targets";
     private static final String TARGET_METHODS_NAME = "targetMethods";
     private static final String USE_SETS_NAME = "useSets";
     private static final String TYPE_REDIRECTS_NAME = "typeRedirects";
@@ -61,7 +63,29 @@ public class RedirectsParser {
 
     public List<ClassTarget> parseClassTargets(JsonObject json) throws RedirectsParseException {
         List<ClassTarget> classTargets = new ArrayList<>();
-        for (Map.Entry<String, JsonElement> classRedirectObject : json.entrySet()) {
+
+        List<String> defaultSets = new ArrayList<>();
+        if (json.has(DEFAULT_SETS_NAME)) {
+            JsonElement sets = json.get(DEFAULT_SETS_NAME);
+            if (!sets.isJsonArray()) {
+                throw new RedirectsParseException(String.format("Targets has invalid %s: %s", DEFAULT_SETS_NAME, sets));
+            }
+
+            JsonArray setArray = sets.getAsJsonArray();
+            for (JsonElement setElement : setArray) {
+                if (!setElement.isJsonPrimitive() || !setElement.getAsJsonPrimitive().isString()) {
+                    throw new RedirectsParseException(String.format("%s has invalid value %s", DEFAULT_SETS_NAME, setElement));
+                }
+                defaultSets.add(setElement.getAsJsonPrimitive().getAsString());
+            }
+        }
+
+        if (!json.has(TARGETS_NAME) || !json.get(TARGETS_NAME).isJsonObject()) {
+            throw new RedirectsParseException(String.format("Could not find or invalid %s tag in %s", TARGETS_NAME, json));
+        }
+        JsonObject targetsJson = json.get(TARGETS_NAME).getAsJsonObject();
+
+        for (Map.Entry<String, JsonElement> classRedirectObject : targetsJson.entrySet()) {
             String classTargetName = throwOnLengthZero(classRedirectObject.getKey(), () -> "Class target node has empty name");
 
             JsonElement classTargetElement = classRedirectObject.getValue();
@@ -70,21 +94,23 @@ public class RedirectsParser {
             }
             JsonObject classTargetNode = classTargetElement.getAsJsonObject();
 
-            if (!classTargetNode.has(USE_SETS_NAME)) {
-                throw new RedirectsParseException(String.format("Class target has no \"%s\" object", USE_SETS_NAME));
-            }
-
             ClassTarget classTarget = new ClassTarget(classTargetName);
 
-            JsonElement usesSetNameElement = classTargetNode.get(USE_SETS_NAME);
-            if (usesSetNameElement.isJsonPrimitive() && usesSetNameElement.getAsJsonPrimitive().isString()) {
-                //single set
-                classTarget.addUsesSet(throwOnLengthZero(usesSetNameElement.getAsString(), () -> "Specified Class set name has zero length"));
-            } else if (usesSetNameElement.isJsonArray()) {
-                //multiple sets
-                JsonArray usesSetNames = usesSetNameElement.getAsJsonArray();
-                for (JsonElement usesSetName : usesSetNames) {
-                    classTarget.addUsesSet(usesSetName.getAsString());
+            if (!classTargetNode.has(USE_SETS_NAME)) { // if there are no specified sets, use the default ones
+                for (String set : defaultSets) {
+                    classTarget.addUsesSet(set);
+                }
+            } else { // sets are specified, find them
+                JsonElement usesSetNameElement = classTargetNode.get(USE_SETS_NAME);
+                if (usesSetNameElement.isJsonPrimitive() && usesSetNameElement.getAsJsonPrimitive().isString()) {
+                    //single set
+                    classTarget.addUsesSet(throwOnLengthZero(usesSetNameElement.getAsString(), () -> "Specified Class set name has zero length"));
+                } else if (usesSetNameElement.isJsonArray()) {
+                    //multiple sets
+                    JsonArray usesSetNames = usesSetNameElement.getAsJsonArray();
+                    for (JsonElement usesSetName : usesSetNames) {
+                        classTarget.addUsesSet(usesSetName.getAsString());
+                    }
                 }
             }
 
