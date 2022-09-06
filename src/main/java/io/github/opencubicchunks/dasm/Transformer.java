@@ -22,11 +22,11 @@ public class Transformer {
     private static final Logger LOGGER = Logger.getLogger(Transformer.class.getName());
 
     private final MappingsProvider mappingsProvider;
-    private final boolean isDev;
+    private final boolean logSelfRedirects;
 
-    public Transformer(MappingsProvider mappingsProvider, boolean isDev) {
+    public Transformer(MappingsProvider mappingsProvider, boolean logSelfRedirects) {
         this.mappingsProvider = mappingsProvider;
-        this.isDev = isDev;
+        this.logSelfRedirects = logSelfRedirects;
     }
 
     public void transformClass(ClassNode targetClass, RedirectsParser.ClassTarget target, List<RedirectsParser.RedirectSet> redirectSets) {
@@ -261,9 +261,6 @@ public class Transformer {
         Type mappedType = remapType(clField.owner);
         String mappedName = this.mappingsProvider.mapFieldName(clField.owner.getClassName(), clField.name, clField.desc.getDescriptor());
         Type mappedDesc = remapDescType(clField.desc);
-        if (clField.name.contains("field") && isDev && mappedName.equals(clField.name)) {
-            throw new Error("Fail! Mapping field " + clField.name + " failed in dev!");
-        }
         return new ClassField(mappedType, mappedName, mappedDesc);
     }
 
@@ -273,9 +270,6 @@ public class Transformer {
 
         Type mappedType = remapType(clMethod.owner);
         String mappedName = this.mappingsProvider.mapMethodName(clMethod.mappingOwner.getClassName(), clMethod.method.getName(), clMethod.method.getDescriptor());
-        if (clMethod.method.getName().contains("method") && isDev && mappedName.equals(clMethod.method.getName())) {
-            throw new Error("Fail! Mapping method " + clMethod.method.getName() + " failed in dev!");
-        }
         Type[] mappedParams = new Type[params.length];
         for (int i = 0; i < params.length; i++) {
             mappedParams[i] = remapDescType(params[i]);
@@ -302,18 +296,12 @@ public class Transformer {
         }
         String mapped = this.mappingsProvider.mapClassName(unmapped);
         String mappedDesc = 'L' + mapped.replace('.', '/') + ';';
-        if (unmapped.contains("class") && isDev && mapped.equals(unmapped)) {
-            throw new Error("Fail! Mapping class " + unmapped + " failed in dev!");
-        }
         return Type.getType(mappedDesc);
     }
 
     private Type remapType(Type t) {
         String unmapped = t.getClassName();
         String mapped = this.mappingsProvider.mapClassName(unmapped);
-        if (unmapped.contains("class") && isDev && mapped.equals(unmapped)) {
-            throw new Error("Fail! Mapping class " + unmapped + " failed in dev!");
-        }
         return Type.getObjectType(mapped.replace('.', '/'));
     }
 
@@ -401,7 +389,7 @@ public class Transformer {
             String key = owner + '.' + name + descriptor;
             String mappedName = methodRedirects.get(key);
             if (mappedName == null) {
-                if (isDev) {
+                if (logSelfRedirects) {
                     LOGGER.info("NOTE: handling METHOD redirect to self: " + key);
                 }
                 methodRedirects.put(key, name);
@@ -412,7 +400,7 @@ public class Transformer {
 
         @Override
         public String mapInvokeDynamicMethodName(final String name, final String descriptor) {
-            if (isDev) {
+            if (logSelfRedirects) {
                 LOGGER.info("NOTE: remapping invokedynamic to self: " + name + "." + descriptor);
             }
             return name;
@@ -423,7 +411,7 @@ public class Transformer {
             String key = owner + '.' + name;
             String mapped = fieldRedirects.get(key);
             if (mapped == null) {
-                if (isDev) {
+                if (logSelfRedirects) {
                     LOGGER.info("NOTE: handling FIELD redirect to self: " + key);
                 }
                 fieldRedirects.put(key, name);
@@ -439,7 +427,7 @@ public class Transformer {
                 mapped = key;
             }
             if (mapped == null) {
-                if (isDev) {
+                if (logSelfRedirects) {
                     LOGGER.info("NOTE: handling CLASS redirect to self: " + key);
                 }
                 typeRedirects.put(key, key);
