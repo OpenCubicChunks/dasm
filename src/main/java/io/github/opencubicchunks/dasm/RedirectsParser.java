@@ -15,6 +15,7 @@ public class RedirectsParser {
     private static final String TARGETS_NAME = "targets";
     private static final String TARGET_METHODS_NAME = "targetMethods";
     private static final String USE_SETS_NAME = "useSets";
+    private static final String DEBUG_SELF_REDIRECTS_NAME = "debugSelfRedirects";
     private static final String TYPE_REDIRECTS_NAME = "typeRedirects";
     private static final String METHOD_REDIRECTS_NAME = "methodRedirects";
     private static final String FIELD_REDIRECTS_NAME = "fieldRedirects";
@@ -111,6 +112,13 @@ public class RedirectsParser {
                     for (JsonElement usesSetName : usesSetNames) {
                         classTarget.addUsesSet(usesSetName.getAsString());
                     }
+                }
+            }
+
+            if (classTargetNode.has(DEBUG_SELF_REDIRECTS_NAME)) {
+                JsonElement debugSelfRedirectsElement = classTargetNode.get(DEBUG_SELF_REDIRECTS_NAME);
+                if (debugSelfRedirectsElement.isJsonPrimitive() && debugSelfRedirectsElement.getAsJsonPrimitive().isBoolean()) {
+                    classTarget.setDebugSelfRedirects(debugSelfRedirectsElement.getAsBoolean());
                 }
             }
 
@@ -364,6 +372,7 @@ public class RedirectsParser {
     public static class ClassTarget {
         private final String className;
         private final List<String> usesSets = new ArrayList<>();
+        private boolean debugSelfRedirects = false;
         private final List<TargetMethod> targetMethods = new ArrayList<>();
         private boolean wholeClass = false;
 
@@ -373,6 +382,10 @@ public class RedirectsParser {
 
         public void addUsesSet(String usesSet) {
             this.usesSets.add(usesSet);
+        }
+
+        public boolean debugSelfRedirects() {
+            return debugSelfRedirects;
         }
 
         public void addTarget(TargetMethod targetMethod) {
@@ -398,6 +411,10 @@ public class RedirectsParser {
 
         public List<String> getSets() {
             return Collections.unmodifiableList(usesSets);
+        }
+
+        public void setDebugSelfRedirects(boolean debugSelfRedirects) {
+            this.debugSelfRedirects = debugSelfRedirects;
         }
 
         public boolean isWholeClass() {

@@ -22,11 +22,15 @@ public class Transformer {
     private static final Logger LOGGER = Logger.getLogger(Transformer.class.getName());
 
     private final MappingsProvider mappingsProvider;
-    private final boolean logSelfRedirects;
+    private final boolean globalLogSelfRedirects;
 
-    public Transformer(MappingsProvider mappingsProvider, boolean logSelfRedirects) {
+    /**
+     * @param mappingsProvider The mappings provider to use
+     * @param globalLogSelfRedirects A global toggle for self redirects logging
+     */
+    public Transformer(MappingsProvider mappingsProvider, boolean globalLogSelfRedirects) {
         this.mappingsProvider = mappingsProvider;
-        this.logSelfRedirects = logSelfRedirects;
+        this.globalLogSelfRedirects = globalLogSelfRedirects;
     }
 
     public void transformClass(ClassNode targetClass, RedirectsParser.ClassTarget target, List<RedirectsParser.RedirectSet> redirectSets) {
@@ -52,7 +56,7 @@ public class Transformer {
         }
 
         if (target.isWholeClass()) {
-            applyWholeClassRedirects(targetClass, methodRedirects, fieldRedirects, typeRedirects);
+            applyWholeClassRedirects(targetClass, methodRedirects, fieldRedirects, typeRedirects, target.debugSelfRedirects());
         } else {
             target.getTargetMethods().forEach(targetMethod -> {
                 String newName = targetMethod.dstMethodName();
@@ -62,12 +66,13 @@ public class Transformer {
                     method = cloneAndApplyRedirects(targetClass, targetMethod.method(), newName,
                             methodRedirects,
                             fieldRedirects,
-                            typeRedirects);
+                            typeRedirects, target.debugSelfRedirects());
                 } else {
                     method = applyRedirects(targetClass, targetMethod.method(), newName,
                             methodRedirects,
                             fieldRedirects,
-                            typeRedirects);
+                            typeRedirects,
+                            target.debugSelfRedirects());
                 }
                 if (targetMethod.makeSyntheticAccessor()) {
                     makeStaticSyntheticAccessor(targetClass, method);
@@ -97,7 +102,8 @@ public class Transformer {
     }
 
     private MethodNode cloneAndApplyRedirects(ClassNode node, ClassMethod existingMethodIn, String newName,
-                                              Map<ClassMethod, String> methodRedirectsIn, Map<ClassField, String> fieldRedirectsIn, Map<Type, Type> typeRedirectsIn) {
+                                              Map<ClassMethod, String> methodRedirectsIn, Map<ClassField, String> fieldRedirectsIn, Map<Type, Type> typeRedirectsIn,
+                                              boolean debugLogging) {
         LOGGER.info("Transforming " + node.name + ": Cloning method " + existingMethodIn.method.getName() + " " + existingMethodIn.method.getDescriptor() + " "
                 + "into " + newName + " and applying remapping");
         Method existingMethod = remapMethod(existingMethodIn).method;
@@ -106,7 +112,7 @@ public class Transformer {
                 .filter(x -> existingMethod.getName().equals(x.name) && existingMethod.getDescriptor().equals(x.desc))
                 .findAny().orElseThrow(() -> new IllegalStateException("Target method " + existingMethod + " not found"));
 
-        Map<Handle, String> redirectedLambdas = cloneAndApplyLambdaRedirects(node, originalMethod, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn);
+        Map<Handle, String> redirectedLambdas = cloneAndApplyLambdaRedirects(node, originalMethod, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn, debugLogging);
 
         Map<ClassMethod, String> methodRedirects = new HashMap<>(methodRedirectsIn);
         for (Handle handle : redirectedLambdas.keySet()) {
@@ -116,7 +122,7 @@ public class Transformer {
             );
         }
 
-        Remapper remapper = new RedirectingRemapper(node, methodRedirects, fieldRedirectsIn, typeRedirectsIn);
+        Remapper remapper = new RedirectingRemapper(node, methodRedirects, fieldRedirectsIn, typeRedirectsIn, debugLogging);
 
         String desc = originalMethod.desc;
         Type[] params = Type.getArgumentTypes(desc);
@@ -158,7 +164,8 @@ public class Transformer {
     }
 
     private MethodNode applyRedirects(ClassNode node, ClassMethod existingMethodIn, String newName,
-                                      Map<ClassMethod, String> methodRedirectsIn, Map<ClassField, String> fieldRedirectsIn, Map<Type, Type> typeRedirectsIn) {
+                                      Map<ClassMethod, String> methodRedirectsIn, Map<ClassField, String> fieldRedirectsIn, Map<Type, Type> typeRedirectsIn,
+                                      boolean debugLogging) {
         LOGGER.info("Transforming " + node.name + ": Cloning method " + existingMethodIn.method.getName() + " " + existingMethodIn.method.getDescriptor() + " "
                 + "into " + newName + " and applying remapping");
         Method existingMethod = remapMethod(existingMethodIn).method;
@@ -167,7 +174,7 @@ public class Transformer {
                 .filter(x -> existingMethod.getName().equals(x.name) && existingMethod.getDescriptor().equals(x.desc))
                 .findAny().orElseThrow(() -> new IllegalStateException("Target method " + existingMethod + " not found"));
 
-        Map<Handle, String> redirectedLambdas = cloneAndApplyLambdaRedirects(node, originalMethod, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn);
+        Map<Handle, String> redirectedLambdas = cloneAndApplyLambdaRedirects(node, originalMethod, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn, debugLogging);
 
         Map<ClassMethod, String> methodRedirects = new HashMap<>(methodRedirectsIn);
         for (Handle handle : redirectedLambdas.keySet()) {
@@ -177,7 +184,7 @@ public class Transformer {
             );
         }
 
-        Remapper remapper = new RedirectingRemapper(node, methodRedirects, fieldRedirectsIn, typeRedirectsIn);
+        Remapper remapper = new RedirectingRemapper(node, methodRedirects, fieldRedirectsIn, typeRedirectsIn, debugLogging);
 
         String desc = originalMethod.desc;
         Type[] params = Type.getArgumentTypes(desc);
@@ -216,11 +223,11 @@ public class Transformer {
     private void applyWholeClassRedirects(ClassNode node,
                                                 Map<ClassMethod, String> methodRedirectsIn,
                                                 Map<ClassField, String> fieldRedirectsIn,
-                                                Map<Type, Type> typeRedirectsIn) {
+                                                Map<Type, Type> typeRedirectsIn, boolean debugLogging) {
 
         LOGGER.info("Transforming " + node.name + ": Transforming whole class");
 
-        Remapper remapper = new RedirectingRemapper(node, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn);
+        Remapper remapper = new RedirectingRemapper(node, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn, debugLogging);
 
         ClassNode oldNode = new ClassNode(ASM9);
         node.accept(oldNode);
@@ -306,7 +313,8 @@ public class Transformer {
     }
 
     private Map<Handle, String> cloneAndApplyLambdaRedirects(ClassNode node, MethodNode method, Map<ClassMethod, String> methodRedirectsIn,
-                                                             Map<ClassField, String> fieldRedirectsIn, Map<Type, Type> typeRedirectsIn) {
+                                                             Map<ClassField, String> fieldRedirectsIn, Map<Type, Type> typeRedirectsIn,
+                                                             boolean debugLogging) {
         Map<Handle, String> lambdaRedirects = new HashMap<>();
         for (AbstractInsnNode instruction : method.instructions) {
             if (instruction.getOpcode() == INVOKEDYNAMIC) {
@@ -323,7 +331,7 @@ public class Transformer {
                                 lambdaRedirects.put(handle, newName);
                                 cloneAndApplyRedirects(node, new ClassMethod(Type.getObjectType(handle.getOwner()),
                                                 new Method(handle.getName(), handle.getDesc())),
-                                        newName, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn);
+                                        newName, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn, debugLogging);
                             }
                         }
                     }
@@ -339,13 +347,14 @@ public class Transformer {
         private final Map<String, String> methodRedirects;
         private final Map<String, String> fieldRedirects;
         private final Map<String, String> typeRedirects;
+        private final boolean debugLogging;
 
         public RedirectingRemapper(ClassNode node,
                                    Map<ClassMethod, String> methodRedirectsIn,
                                    Map<ClassField, String> fieldRedirectsIn,
-                                   Map<Type, Type> typeRedirectsIn) {
+                                   Map<Type, Type> typeRedirectsIn, boolean debugLogging) {
 
-
+            this.debugLogging = debugLogging;
             this.defaultKnownClasses = Sets.newHashSet(
                     Type.getType(Object.class).getInternalName(),
                     Type.getType(String.class).getInternalName(),
@@ -389,7 +398,7 @@ public class Transformer {
             String key = owner + '.' + name + descriptor;
             String mappedName = methodRedirects.get(key);
             if (mappedName == null) {
-                if (logSelfRedirects) {
+                if (globalLogSelfRedirects || this.debugLogging) {
                     LOGGER.info("NOTE: handling METHOD redirect to self: " + key);
                 }
                 methodRedirects.put(key, name);
@@ -400,7 +409,7 @@ public class Transformer {
 
         @Override
         public String mapInvokeDynamicMethodName(final String name, final String descriptor) {
-            if (logSelfRedirects) {
+            if (globalLogSelfRedirects || this.debugLogging) {
                 LOGGER.info("NOTE: remapping invokedynamic to self: " + name + "." + descriptor);
             }
             return name;
@@ -411,7 +420,7 @@ public class Transformer {
             String key = owner + '.' + name;
             String mapped = fieldRedirects.get(key);
             if (mapped == null) {
-                if (logSelfRedirects) {
+                if (globalLogSelfRedirects || this.debugLogging) {
                     LOGGER.info("NOTE: handling FIELD redirect to self: " + key);
                 }
                 fieldRedirects.put(key, name);
@@ -427,7 +436,7 @@ public class Transformer {
                 mapped = key;
             }
             if (mapped == null) {
-                if (logSelfRedirects) {
+                if (globalLogSelfRedirects || this.debugLogging) {
                     LOGGER.info("NOTE: handling CLASS redirect to self: " + key);
                 }
                 typeRedirects.put(key, key);
