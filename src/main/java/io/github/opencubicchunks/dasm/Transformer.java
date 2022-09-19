@@ -88,7 +88,7 @@ public class Transformer {
         newParams[0] = getObjectType(node.name);
 
         Type returnType = Type.getReturnType(newMethod.desc);
-        MethodNode newNode = new MethodNode(newMethod.access | ACC_STATIC | ACC_SYNTHETIC, newMethod.name,
+        MethodNode newNode = new MethodNode(newMethod.access | ACC_STATIC, newMethod.name,
                 Type.getMethodDescriptor(returnType, newParams), null, null);
 
         int j = 0;
@@ -148,7 +148,7 @@ public class Transformer {
 
         MethodVisitor mv = new MethodVisitor(ASM7, output) {
             @Override public void visitLineNumber(int line, Label start) {
-                super.visitLineNumber(line + 10000, start);
+                super.visitLineNumber(line, start);
             }
         };
         MethodRemapper methodRemapper = new MethodRemapper(mv, remapper);
@@ -203,7 +203,7 @@ public class Transformer {
 
         MethodVisitor mv = new MethodVisitor(ASM7, output) {
             @Override public void visitLineNumber(int line, Label start) {
-                super.visitLineNumber(line + 10000, start);
+                super.visitLineNumber(line, start);
             }
         };
         MethodRemapper methodRemapper = new MethodRemapper(mv, remapper);
