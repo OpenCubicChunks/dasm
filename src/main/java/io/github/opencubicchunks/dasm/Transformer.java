@@ -141,7 +141,7 @@ public class Transformer {
         MethodNode output;
         if (existingOutput != null) {
             // Remove stub annotations, they may be added by stirrin if this is a stub
-            if (existingOutput.visibleAnnotations.removeIf(annotationNode -> annotationNode.desc.equals("Lio/github/opencubicchunks/stirrin/Stub;"))) {
+            if (existingOutput.visibleAnnotations.removeIf(annotationNode -> annotationNode.desc.equals("Lio/github/opencubicchunks/stirrin/StirrinStub;"))) {
                 // this is a stub? Instructions should be overwritten.
                 existingOutput.instructions = new InsnList();
                 LOGGER.info("Overwriting stub method " + newName + " " + mappedDesc);
