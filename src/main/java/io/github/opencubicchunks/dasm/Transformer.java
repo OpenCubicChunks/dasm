@@ -137,10 +137,18 @@ public class Transformer {
         }
         String mappedDesc = Type.getMethodDescriptor(ret, params);
 
-        MethodNode existingOutput = findExistingMethod(node, newName, mappedDesc);
+        MethodNode existingOutput = removeExistingMethod(node, newName, mappedDesc);
         MethodNode output;
         if (existingOutput != null) {
-            LOGGER.info("Copying code into existing method " + newName + " " + mappedDesc);
+            // Remove stub annotations, they may be added by stirrin if this is a stub
+            if (existingOutput.visibleAnnotations.removeIf(annotationNode -> annotationNode.desc.equals("Lio/github/opencubicchunks/stirrin/Stub;"))) {
+                // this is a stub? Instructions should be overwritten.
+                existingOutput.instructions = new InsnList();
+                LOGGER.info("Overwriting stub method " + newName + " " + mappedDesc);
+            } else {
+                LOGGER.info("Copying code into existing method " + newName + " " + mappedDesc);
+            }
+
             output = existingOutput;
         } else {
             output = new MethodNode(originalMethod.access, newName, mappedDesc, null, originalMethod.exceptions.toArray(new String[0]));
@@ -221,9 +229,9 @@ public class Transformer {
 
 
     private void applyWholeClassRedirects(ClassNode node,
-                                                Map<ClassMethod, String> methodRedirectsIn,
-                                                Map<ClassField, String> fieldRedirectsIn,
-                                                Map<Type, Type> typeRedirectsIn, boolean debugLogging) {
+                                          Map<ClassMethod, String> methodRedirectsIn,
+                                          Map<ClassField, String> fieldRedirectsIn,
+                                          Map<Type, Type> typeRedirectsIn, boolean debugLogging) {
 
         LOGGER.info("Transforming " + node.name + ": Transforming whole class");
 
@@ -260,8 +268,11 @@ public class Transformer {
         oldNode.accept(classRemapper);
     }
 
-    private static MethodNode findExistingMethod(ClassNode node, String name, String desc) {
-        return node.methods.stream().filter(m -> m.name.equals(name) && m.desc.equals(desc)).findAny().orElse(null);
+    private static MethodNode removeExistingMethod(ClassNode node, String name, String desc) {
+        MethodNode methodNode = node.methods.stream().filter(m -> m.name.equals(name) && m.desc.equals(desc)).findAny().orElse(null);
+        if (methodNode != null)
+            node.methods.remove(methodNode);
+        return methodNode;
     }
 
     private ClassField remapField(ClassField clField) {
