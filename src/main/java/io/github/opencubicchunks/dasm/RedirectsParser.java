@@ -245,9 +245,10 @@ public class RedirectsParser {
 
             JsonElement value = fieldRedirect.getValue();
             if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
+                String dstFieldName = remapImportForRedirectDestination(value.getAsString(), imports);
                 output.addRedirect(new RedirectSet.FieldRedirect(
                         field,
-                        throwOnLengthZero(value.getAsString(), () -> String.format("Field redirect has zero length string value: %s", fieldRedirect))
+                        throwOnLengthZero(dstFieldName, () -> String.format("Field redirect has zero length string value: %s", fieldRedirect))
                 ));
             } else if (value.isJsonObject()) { // field redirect might contain a mappings owner
                 JsonObject fieldRedirectValue = value.getAsJsonObject();
@@ -261,6 +262,7 @@ public class RedirectsParser {
                 }
 
                 String dstFieldName = throwOnLengthZero(newNameNode.getAsString(), () -> String.format("Field redirect has zero length value for key %s", fieldRedirect));
+                dstFieldName = remapImportForRedirectDestination(dstFieldName, imports);
                 String mappingsOwner = getMappingsOwnerIfPresent(fieldRedirectValue); //TODO: support if required at some point
 
                 output.addRedirect(new RedirectSet.FieldRedirect(field, dstFieldName));
@@ -277,6 +279,7 @@ public class RedirectsParser {
             JsonElement value = methodRedirect.getValue();
             if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
                 String dstMethodName = throwOnLengthZero(value.getAsString(), () -> String.format("Method redirect has zero length value for key %s", methodRedirect));
+                dstMethodName = remapImportForRedirectDestination(dstMethodName, imports);
                 output.addRedirect(new RedirectSet.MethodRedirect(method, dstMethodName));
             } else if (value.isJsonObject()) { // method redirect might contain a mappings owner
                 JsonObject methodRedirectValue = value.getAsJsonObject();
@@ -290,6 +293,7 @@ public class RedirectsParser {
                 }
 
                 String dstMethodName = throwOnLengthZero(newNameNode.getAsString(), () -> String.format("Method redirect has zero length value for key %s", methodRedirect));
+                dstMethodName = remapImportForRedirectDestination(dstMethodName, imports);
                 String mappingsOwner = getMappingsOwnerIfPresent(methodRedirectValue);
 
                 output.addRedirect(new RedirectSet.MethodRedirect(
@@ -304,6 +308,17 @@ public class RedirectsParser {
                 throw new RedirectsParseException(String.format("Could not parse Method redirect %s", methodRedirect));
             }
         }
+    }
+
+    private String remapImportForRedirectDestination(String dstName, Map<String, String> imports) throws RedirectsParseException {
+        if (!dstName.contains(".")) {
+            return dstName;
+        }
+        int lastDot = dstName.lastIndexOf('.');
+        String newOwner = dstName.substring(0, lastDot);
+        newOwner = resolveType(newOwner, imports);
+        String newName = dstName.substring(lastDot + 1);
+        return newOwner + "." + newName;
     }
 
     private static Map<String, String> parseImports(JsonArray importArray) throws RedirectsParseException {
