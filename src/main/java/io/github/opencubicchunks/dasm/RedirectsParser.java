@@ -6,6 +6,7 @@ import java.util.function.Supplier;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.commons.Method;
@@ -19,6 +20,7 @@ public class RedirectsParser {
     private static final String TYPE_REDIRECTS_NAME = "typeRedirects";
     private static final String METHOD_REDIRECTS_NAME = "methodRedirects";
     private static final String FIELD_REDIRECTS_NAME = "fieldRedirects";
+    private static final String IMPORTS_NAME = "imports";
 
     private static final String MAKE_SYNTHETIC_ACCESSOR_NAME = "makeSyntheticAccessor";
     private static final String SHOULD_CLONE_NAME = "shouldClone";
@@ -38,23 +40,35 @@ public class RedirectsParser {
 
             RedirectSet redirectSet = new RedirectSet(redirectSetName);
 
+            Map<String, String> imports;
+            if (redirectJson.has(IMPORTS_NAME)) {
+                if (!redirectJson.get(IMPORTS_NAME).isJsonArray()) {
+                    throw new RedirectsParseException(String.format("Redirect set has non-array \"%s\" object", IMPORTS_NAME));
+                }
+
+                JsonArray importArray = redirectJson.get(IMPORTS_NAME).getAsJsonArray();
+                imports = parseImports(importArray);
+            } else {
+                imports = new HashMap<>();
+            }
+
             if (!redirectJson.has(TYPE_REDIRECTS_NAME) || !redirectJson.get(TYPE_REDIRECTS_NAME).isJsonObject()) {
                 throw new RedirectsParseException(String.format("Redirect set has no \"%s\" object", TYPE_REDIRECTS_NAME));
             }
             Set<Map.Entry<String, JsonElement>> typeRedirects = redirectJson.get(TYPE_REDIRECTS_NAME).getAsJsonObject().entrySet();
-            parseTypeRedirects(redirectSet, typeRedirects);
+            parseTypeRedirects(redirectSet, typeRedirects, imports);
 
             if (!redirectJson.has(FIELD_REDIRECTS_NAME) || !redirectJson.get(FIELD_REDIRECTS_NAME).isJsonObject()) {
                 throw new RedirectsParseException(String.format("Redirect set has no \"%s\" object", FIELD_REDIRECTS_NAME));
             }
             Set<Map.Entry<String, JsonElement>> fieldRedirects = redirectJson.get(FIELD_REDIRECTS_NAME).getAsJsonObject().entrySet();
-            parseFieldRedirects(redirectSet, fieldRedirects);
+            parseFieldRedirects(redirectSet, fieldRedirects, imports);
 
             if (!redirectJson.has(METHOD_REDIRECTS_NAME) || !redirectJson.get(METHOD_REDIRECTS_NAME).isJsonObject()) {
                 throw new RedirectsParseException(String.format("Redirect set has no \"%s\" object", METHOD_REDIRECTS_NAME));
             }
             Set<Map.Entry<String, JsonElement>> methodRedirects = redirectJson.get(METHOD_REDIRECTS_NAME).getAsJsonObject().entrySet();
-            parseMethodRedirects(redirectSet, methodRedirects);
+            parseMethodRedirects(redirectSet, methodRedirects, imports);
 
             redirectSets.add(redirectSet);
         }
@@ -63,8 +77,19 @@ public class RedirectsParser {
     }
 
     public List<ClassTarget> parseClassTargets(JsonObject json) throws RedirectsParseException {
-        List<ClassTarget> classTargets = new ArrayList<>();
+        Map<String, String> imports;
+        if (json.has(IMPORTS_NAME)) {
+            if (!json.get(IMPORTS_NAME).isJsonArray()) {
+                throw new RedirectsParseException(String.format("Targets has non-array \"%s\" object", IMPORTS_NAME));
+            }
 
+            JsonArray importArray = json.get(IMPORTS_NAME).getAsJsonArray();
+            imports = parseImports(importArray);
+        } else {
+            imports = new HashMap<>();
+        }
+
+        List<ClassTarget> classTargets = new ArrayList<>();
         List<String> defaultSets = new ArrayList<>();
         if (json.has(DEFAULT_SETS_NAME)) {
             JsonElement sets = json.get(DEFAULT_SETS_NAME);
@@ -88,6 +113,7 @@ public class RedirectsParser {
 
         for (Map.Entry<String, JsonElement> classRedirectObject : targetsJson.entrySet()) {
             String classTargetName = throwOnLengthZero(classRedirectObject.getKey(), () -> "Class target node has empty name");
+            classTargetName = resolveType(classTargetName, imports);
 
             JsonElement classTargetElement = classRedirectObject.getValue();
             if (!classTargetElement.isJsonObject()) {
@@ -125,7 +151,7 @@ public class RedirectsParser {
             // it's possible the class target to target the whole class, and so has no target methods
             if (classTargetNode.has(TARGET_METHODS_NAME) && classTargetNode.get(TARGET_METHODS_NAME).isJsonObject()) {
                 Set<Map.Entry<String, JsonElement>> targetMethodsNode = classTargetNode.get(TARGET_METHODS_NAME).getAsJsonObject().entrySet();
-                parseTargetMethods(classTarget, targetMethodsNode);
+                parseTargetMethods(classTarget, targetMethodsNode, imports);
             } else {
                 classTarget.targetWholeClass();
             }
@@ -136,13 +162,13 @@ public class RedirectsParser {
         return classTargets;
     }
 
-    private void parseTargetMethods(ClassTarget output, Set<Map.Entry<String, JsonElement>> methodRedirects) throws RedirectsParseException {
-        for (Map.Entry<String, JsonElement> methodRedirect : methodRedirects) {
-            Transformer.ClassMethod method = parseTargetMethodSignature(output.getClassName(), methodRedirect.getKey());
+    private void parseTargetMethods(ClassTarget output, Set<Map.Entry<String, JsonElement>> methodTargets, Map<String, String> imports) throws RedirectsParseException {
+        for (Map.Entry<String, JsonElement> methodTarget : methodTargets) {
+            Transformer.ClassMethod method = parseTargetMethodSignature(output.getClassName(), methodTarget.getKey(), imports);
 
-            JsonElement value = methodRedirect.getValue();
+            JsonElement value = methodTarget.getValue();
             if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
-                String dstMethodName = throwOnLengthZero(value.getAsString(), () -> String.format("Target method has zero length value for key %s", methodRedirect));
+                String dstMethodName = throwOnLengthZero(value.getAsString(), () -> String.format("Target method has zero length value for key %s", methodTarget));
                 output.addTarget(new ClassTarget.TargetMethod(
                         method,
                         dstMethodName,
@@ -160,7 +186,7 @@ public class RedirectsParser {
                     throw new RedirectsParseException(String.format("Target method value does not contain a valid \"%s\". %s", DST_NAME, newNameNode));
                 }
 
-                String dstMethodName = throwOnLengthZero(newNameNode.getAsString(), () -> String.format("Target method has zero length value for key %s", methodRedirect));
+                String dstMethodName = throwOnLengthZero(newNameNode.getAsString(), () -> String.format("Target method has zero length value for key %s", methodTarget));
 
                 boolean makeSyntheticAccessor = getMakeSyntheticAccessorIfPresent(targetMethodValue);
                 boolean shouldClone = getShouldCloneIfPresent(targetMethodValue);
@@ -173,27 +199,27 @@ public class RedirectsParser {
                         makeSyntheticAccessor)
                 );
             } else {
-                throw new RedirectsParseException(String.format("Could not parse Target method %s", methodRedirect));
+                throw new RedirectsParseException(String.format("Could not parse Target method %s", methodTarget));
             }
         }
     }
 
-    private void parseTypeRedirects(RedirectSet output, Set<Map.Entry<String, JsonElement>> typeRedirects) throws RedirectsParseException {
+    private void parseTypeRedirects(RedirectSet output, Set<Map.Entry<String, JsonElement>> typeRedirects, Map<String, String> imports) throws RedirectsParseException {
         for (Map.Entry<String, JsonElement> typeRedirect : typeRedirects) {
             JsonElement value = typeRedirect.getValue();
             if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
                 throw new RedirectsParseException(String.format("Type redirect value has invalid structure: %s", value));
             }
             output.addRedirect(new RedirectSet.TypeRedirect(
-                    throwOnLengthZero(typeRedirect.getKey(), () -> String.format("Type redirect has zero length string key: %s", typeRedirect)),
-                    throwOnLengthZero(value.getAsString(), () -> String.format("Type redirect has zero length string value: %s", typeRedirect))
+                    throwOnLengthZero(resolveType(typeRedirect.getKey(), imports), () -> String.format("Type redirect has zero length string key: %s", typeRedirect)),
+                    throwOnLengthZero(resolveType(value.getAsString(), imports), () -> String.format("Type redirect has zero length string value: %s", typeRedirect))
             ));
         }
     }
 
-    private void parseFieldRedirects(RedirectSet output, Set<Map.Entry<String, JsonElement>> fieldRedirects) throws RedirectsParseException {
+    private void parseFieldRedirects(RedirectSet output, Set<Map.Entry<String, JsonElement>> fieldRedirects, Map<String, String> imports) throws RedirectsParseException {
         for (Map.Entry<String, JsonElement> fieldRedirect : fieldRedirects) {
-            Transformer.ClassField field = parseFieldSignature(fieldRedirect.getKey());
+            Transformer.ClassField field = parseFieldSignature(fieldRedirect.getKey(), imports);
 
             JsonElement value = fieldRedirect.getValue();
             if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
@@ -222,9 +248,9 @@ public class RedirectsParser {
         }
     }
 
-    private void parseMethodRedirects(RedirectSet output, Set<Map.Entry<String, JsonElement>> methodRedirects) throws RedirectsParseException {
+    private void parseMethodRedirects(RedirectSet output, Set<Map.Entry<String, JsonElement>> methodRedirects, Map<String, String> imports) throws RedirectsParseException {
         for (Map.Entry<String, JsonElement> methodRedirect : methodRedirects) {
-            Transformer.ClassMethod method = parseMethodSignature(methodRedirect.getKey());
+            Transformer.ClassMethod method = parseMethodSignature(methodRedirect.getKey(), imports);
 
             JsonElement value = methodRedirect.getValue();
             if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
@@ -248,7 +274,7 @@ public class RedirectsParser {
                         new Transformer.ClassMethod(
                                 method.owner,
                                 method.method,
-                                mappingsOwner == null ? method.owner : getTypeFromName(mappingsOwner)
+                                mappingsOwner == null ? method.owner : getTypeFromName(resolveType(mappingsOwner, imports))
                         ),
                         dstMethodName
                 ));
@@ -256,6 +282,73 @@ public class RedirectsParser {
                 throw new RedirectsParseException(String.format("Could not parse Method redirect %s", methodRedirect));
             }
         }
+    }
+
+    private static Map<String, String> parseImports(JsonArray importArray) throws RedirectsParseException {
+        Map<String, String> imports = new HashMap<>();
+
+        for (JsonElement jsonElement : importArray) {
+            if (jsonElement.isJsonPrimitive() && jsonElement.getAsJsonPrimitive().isString()) {
+                String importString = jsonElement.getAsString();
+                int lastDot = importString.lastIndexOf('.');
+                if (lastDot == -1) { // there is no dot
+                    throw new RedirectsParseException(String.format("Import does not contain package \"%s\"", importString));
+                }
+                if (lastDot == importString.length() - 1) { // dot is last character
+                    throw new RedirectsParseException(String.format("Invalid import, ends with `.` \"%s\"", importString));
+                }
+
+                String key = importString.substring(lastDot + 1);
+                if (imports.containsKey(key)) {
+                    throw new RedirectsParseException(String.format("Illegal duplicate import \"%s\" -> \"%s\"", key, importString));
+                }
+                imports.put(key, importString);
+            } else {
+                throw new RedirectsParseException(String.format("Invalid object in redirect set %s \"%s\"", IMPORTS_NAME, jsonElement));
+            }
+        }
+
+        return imports;
+    }
+
+    private static String resolveType(String typeName, Map<String, String> imports) {
+        int indexOfArray = typeName.indexOf("[");
+
+        if (indexOfArray == -1) { // no array
+            return imports.getOrDefault(typeName, typeName);
+        }
+
+        String type = typeName.substring(0, indexOfArray);
+
+        int arrayDepth = StringUtils.countMatches(typeName, "[]");
+        String arrayPart = StringUtils.repeat("[]", arrayDepth);
+
+        return imports.getOrDefault(type, type) + arrayPart;
+    }
+
+    private static String applyImportsToMethodSignature(String signature, Map<String, String> imports) throws RedirectsParseException {
+        int spaceIdx = signature.indexOf(" ");
+        int openingBraceIdx = signature.indexOf("(");
+        int closingBracketIdx = signature.indexOf(")");
+        if (spaceIdx == -1 || openingBraceIdx == -1 || closingBracketIdx == -1) {
+            throw new RedirectsParseException(String.format("Illegal method signature \"%s\"", signature));
+        }
+
+        String returnType = signature.substring(0, spaceIdx).trim();
+        String resolvedReturnType = resolveType(returnType, imports);
+
+        String methodName = signature.substring(spaceIdx + 1, openingBraceIdx);
+        String methodArgs = signature.substring(openingBraceIdx + 1, closingBracketIdx);
+
+        StringBuilder sb = new StringBuilder(resolvedReturnType).append(" ")
+                .append(methodName).append('(');
+        for (String argument : methodArgs.split(",")) {
+            sb.append(resolveType(argument.trim(), imports)).append(", ");
+        }
+        sb.delete(sb.length() - 2, sb.length());
+        sb.append(')');
+
+        return sb.toString();
     }
 
     private boolean getMakeSyntheticAccessorIfPresent(JsonObject redirectElement) throws RedirectsParseException {
@@ -293,44 +386,50 @@ public class RedirectsParser {
     }
 
     /**
-     * Accepts signature like {@code owner#type ident}
+     * Accepts signature like {@code method(arg1, arg2)}
      * <p>eg: {@code net.minecraft.world.level.chunk.LevelChunkSection sections}</p>
      */
-    public static Transformer.ClassMethod parseTargetMethodSignature(String owner, String in) throws RedirectsParseException {
+    public static Transformer.ClassMethod parseTargetMethodSignature(String owner, String in, Map<String, String> imports) throws RedirectsParseException {
         String s = throwOnLengthZero(in, () -> "Signature has zero length");
 
         try {
-            Method method = Method.getMethod(s);
+            System.err.println("in: " + in);
+            String signature = applyImportsToMethodSignature(in, imports);
+            System.err.println("out: " + signature);
+            Method method = Method.getMethod(signature);
 
-            return new Transformer.ClassMethod(getTypeFromName(owner), method);
+            String ownerTypeName = resolveType(owner, imports);
+            return new Transformer.ClassMethod(getTypeFromName(ownerTypeName), method);
         } catch (IllegalArgumentException e) {
             throw new RedirectsParseException(String.format("Could not parse signature %s", s), e);
         }
     }
 
     /**
-     * Accepts signature like {@code owner#type ident}
+     * Accepts signature like {@code owner | method(arg1, arg2)}
      * <p>eg: {@code net.minecraft.world.level.chunk.LevelChunk | net.minecraft.world.level.chunk.LevelChunkSection sections}</p>
      */
-    public static Transformer.ClassMethod parseMethodSignature(String in) throws RedirectsParseException {
+    public static Transformer.ClassMethod parseMethodSignature(String in, Map<String, String> imports) throws RedirectsParseException {
         String s = throwOnLengthZero(in, () -> "Signature has zero length");
 
         try {
             String[] split = requireLengthN(s.split(" ?\\| ?"), 2, () -> String.format("Invalid signature, \"%s\" didnt have a `|`. Expected signature like: OWNER | RETURNTYPE IDENT", in));
 
-            Method method = Method.getMethod(split[1]);
+            String signature = applyImportsToMethodSignature(split[1], imports);
+            Method method = Method.getMethod(signature);
 
-            return new Transformer.ClassMethod(getTypeFromName(split[0]), method);
+            String ownerTypeName = resolveType(split[0], imports);
+            return new Transformer.ClassMethod(getTypeFromName(ownerTypeName), method);
         } catch (IllegalArgumentException e) {
             throw new RedirectsParseException(String.format("Could not parse signature %s", s), e);
         }
     }
 
     /**
-     * Accepts signature like {@code owner#type ident}
+     * Accepts signature like {@code owner | type name}
      * <p>eg: {@code net.minecraft.world.level.chunk.LevelChunk | net.minecraft.world.level.chunk.LevelChunkSection sections}</p>
      */
-    public static Transformer.ClassField parseFieldSignature(String in) throws RedirectsParseException {
+    public static Transformer.ClassField parseFieldSignature(String in, Map<String, String> imports) throws RedirectsParseException {
         String s = throwOnLengthZero(in, () -> "Signature has zero length");
 
         try {
@@ -338,8 +437,11 @@ public class RedirectsParser {
 
             String[] typeIdentSplit = split[1].split(" ");
 
-            return new Transformer.ClassField(getTypeFromName(split[0]), typeIdentSplit[1], getTypeFromName(typeIdentSplit[0]));
-        } catch (IllegalArgumentException e) {
+            String resolvedOwner = resolveType(split[0], imports);
+            String resolvedFieldType = resolveType(typeIdentSplit[0], imports);
+
+            return new Transformer.ClassField(getTypeFromName(resolvedOwner), typeIdentSplit[1], getTypeFromName(resolvedFieldType));
+        } catch (IllegalArgumentException | ArrayIndexOutOfBoundsException e) {
             throw new RedirectsParseException(String.format("Could not parse signature %s", s), e);
         }
     }
@@ -518,8 +620,8 @@ public class RedirectsParser {
         }
 
         public static final class TypeRedirect {
-            private final String srcClassName;
-            private final String dstClassName;
+            private String srcClassName;
+            private String dstClassName;
 
             public TypeRedirect(String srcClassName, String dstClassName) {
                 this.srcClassName = srcClassName;
