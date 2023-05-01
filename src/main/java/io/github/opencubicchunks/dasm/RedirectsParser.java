@@ -28,6 +28,10 @@ public class RedirectsParser {
     private static final String DST_NAME = "newName";
 
     public List<RedirectSet> parseRedirectSet(JsonObject json) throws RedirectsParseException {
+        return parseRedirectSet(json, new HashSet<>());
+    }
+
+    public List<RedirectSet> parseRedirectSet(JsonObject json, Set<String> globalImports) throws RedirectsParseException {
         List<RedirectSet> redirectSets = new ArrayList<>();
         for (Map.Entry<String, JsonElement> classRedirectObject : json.entrySet()) {
             String redirectSetName = throwOnLengthZero(classRedirectObject.getKey(), () -> "Redirect Set node has empty name");
@@ -50,6 +54,13 @@ public class RedirectsParser {
                 imports = parseImports(importArray);
             } else {
                 imports = new HashMap<>();
+            }
+            for (String importString : globalImports) {
+                String importKey = getImportKey(importString);
+                if (imports.containsKey(importKey)) {
+                    throw new RedirectsParseException(String.format("Illegal duplicate (global+local) import \"%s\" -> \"%s\"", importKey, importString));
+                }
+                imports.put(importKey, importString);
             }
 
             if (!redirectJson.has(TYPE_REDIRECTS_NAME) || !redirectJson.get(TYPE_REDIRECTS_NAME).isJsonObject()) {
@@ -77,6 +88,10 @@ public class RedirectsParser {
     }
 
     public List<ClassTarget> parseClassTargets(JsonObject json) throws RedirectsParseException {
+        return parseClassTargets(json, new HashSet<>());
+    }
+
+    public List<ClassTarget> parseClassTargets(JsonObject json, Set<String> globalImports) throws RedirectsParseException {
         Map<String, String> imports;
         if (json.has(IMPORTS_NAME)) {
             if (!json.get(IMPORTS_NAME).isJsonArray()) {
@@ -87,6 +102,13 @@ public class RedirectsParser {
             imports = parseImports(importArray);
         } else {
             imports = new HashMap<>();
+        }
+        for (String importString : globalImports) {
+            String importKey = getImportKey(importString);
+            if (imports.containsKey(importKey)) {
+                throw new RedirectsParseException(String.format("Illegal duplicate (global+local) import \"%s\" -> \"%s\"", importKey, importString));
+            }
+            imports.put(importKey, importString);
         }
 
         List<ClassTarget> classTargets = new ArrayList<>();
@@ -290,25 +312,31 @@ public class RedirectsParser {
         for (JsonElement jsonElement : importArray) {
             if (jsonElement.isJsonPrimitive() && jsonElement.getAsJsonPrimitive().isString()) {
                 String importString = jsonElement.getAsString();
-                int lastDot = importString.lastIndexOf('.');
-                if (lastDot == -1) { // there is no dot
-                    throw new RedirectsParseException(String.format("Import does not contain package \"%s\"", importString));
+                String importKey = getImportKey(importString);
+                if (imports.containsKey(importKey)) {
+                    throw new RedirectsParseException(String.format("Illegal duplicate import \"%s\" -> \"%s\"", importKey, importString));
                 }
-                if (lastDot == importString.length() - 1) { // dot is last character
-                    throw new RedirectsParseException(String.format("Invalid import, ends with `.` \"%s\"", importString));
-                }
-
-                String key = importString.substring(lastDot + 1);
-                if (imports.containsKey(key)) {
-                    throw new RedirectsParseException(String.format("Illegal duplicate import \"%s\" -> \"%s\"", key, importString));
-                }
-                imports.put(key, importString);
+                imports.put(importKey, importString);
             } else {
                 throw new RedirectsParseException(String.format("Invalid object in redirect set %s \"%s\"", IMPORTS_NAME, jsonElement));
             }
         }
 
         return imports;
+    }
+
+    @NotNull
+    private static String getImportKey(String importString) throws RedirectsParseException {
+        int lastDot = importString.lastIndexOf('.');
+        if (lastDot == -1) { // there is no dot
+            throw new RedirectsParseException(String.format("Import does not contain package \"%s\"", importString));
+        }
+        if (lastDot == importString.length() - 1) { // dot is last character
+            throw new RedirectsParseException(String.format("Invalid import, ends with `.` \"%s\"", importString));
+        }
+
+        String key = importString.substring(lastDot + 1);
+        return key;
     }
 
     private static String resolveType(String typeName, Map<String, String> imports) {
