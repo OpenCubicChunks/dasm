@@ -339,11 +339,31 @@ public class RedirectsParser {
         return key;
     }
 
-    private static String resolveType(String typeName, Map<String, String> imports) {
+    private static void validateType(String typeName, String resolvedTypeName) throws RedirectsParseException {
+        switch (resolvedTypeName) {
+            case "void":
+            case "boolean":
+            case "char":
+            case "byte":
+            case "short":
+            case "int":
+            case "float":
+            case "long":
+            case "double":
+                return;
+        }
+        if (!resolvedTypeName.contains(".")) {
+            throw new RedirectsParseException(String.format("Import-resolved class is illegal: \"%s\" -> \"%s\"", typeName, resolvedTypeName));
+        }
+    }
+
+    private static String resolveType(String typeName, Map<String, String> imports) throws RedirectsParseException {
         int indexOfArray = typeName.indexOf("[");
 
         if (indexOfArray == -1) { // no array
-            return imports.getOrDefault(typeName, typeName);
+            String resolved = imports.getOrDefault(typeName, typeName);
+            validateType(typeName, resolved);
+            return resolved;
         }
 
         String type = typeName.substring(0, indexOfArray);
@@ -351,7 +371,9 @@ public class RedirectsParser {
         int arrayDepth = StringUtils.countMatches(typeName, "[]");
         String arrayPart = StringUtils.repeat("[]", arrayDepth);
 
-        return imports.getOrDefault(type, type) + arrayPart;
+        String resolved = imports.getOrDefault(type, type);
+        validateType(type, resolved);
+        return resolved + arrayPart;
     }
 
     private static String applyImportsToMethodSignature(String signature, Map<String, String> imports) throws RedirectsParseException {
@@ -370,10 +392,17 @@ public class RedirectsParser {
 
         StringBuilder sb = new StringBuilder(resolvedReturnType).append(" ")
                 .append(methodName).append('(');
-        for (String argument : methodArgs.split(",")) {
-            sb.append(resolveType(argument.trim(), imports)).append(", ");
+        String[] split = methodArgs.split(",");
+        if (split.length > 0 && !split[0].equals("")) { // java split returns a 1-size array even for an empty string
+            for (int i = 0; i < split.length; i++) {
+                String argument = split[i];
+                sb.append(resolveType(argument.trim(), imports));
+
+                if (i < split.length - 1) {
+                    sb.append(", ");
+                }
+            }
         }
-        sb.delete(sb.length() - 2, sb.length());
         sb.append(')');
 
         return sb.toString();
