@@ -26,6 +26,7 @@ public class RedirectsParser {
     private static final String SHOULD_CLONE_NAME = "shouldClone";
     private static final String MAPPINGS_OWNER_NAME = "mappingsOwner";
     private static final String DST_NAME = "newName";
+    private static final String IS_DST_INTERFACE_NAME = "isDstInterface";
 
     public List<RedirectSet> parseRedirectSet(JsonObject json) throws RedirectsParseException {
         return parseRedirectSet(json, new HashSet<>());
@@ -232,7 +233,7 @@ public class RedirectsParser {
             if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
                 throw new RedirectsParseException(String.format("Type redirect value has invalid structure: %s", value));
             }
-            output.addRedirect(new RedirectSet.TypeRedirect(
+            output.addRedirect(new TypeRedirect(
                     throwOnLengthZero(resolveType(typeRedirect.getKey(), imports), () -> String.format("Type redirect has zero length string key: %s", typeRedirect)),
                     throwOnLengthZero(resolveType(value.getAsString(), imports), () -> String.format("Type redirect has zero length string value: %s", typeRedirect))
             ));
@@ -245,10 +246,12 @@ public class RedirectsParser {
 
             JsonElement value = fieldRedirect.getValue();
             if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
-                String dstFieldName = remapImportForRedirectDestination(value.getAsString(), imports);
-                output.addRedirect(new RedirectSet.FieldRedirect(
+                String dstFieldName = throwOnLengthZero(value.getAsString(), () -> String.format("Field redirect has zero length string value: %s", fieldRedirect));
+                String[] dstOwnerAndName = remapImportForRedirectDestination(dstFieldName, imports);
+                output.addRedirect(new FieldRedirect(
                         field,
-                        throwOnLengthZero(dstFieldName, () -> String.format("Field redirect has zero length string value: %s", fieldRedirect))
+                        dstOwnerAndName[0],
+                        dstOwnerAndName[1]
                 ));
             } else if (value.isJsonObject()) { // field redirect might contain a mappings owner
                 JsonObject fieldRedirectValue = value.getAsJsonObject();
@@ -262,10 +265,10 @@ public class RedirectsParser {
                 }
 
                 String dstFieldName = throwOnLengthZero(newNameNode.getAsString(), () -> String.format("Field redirect has zero length value for key %s", fieldRedirect));
-                dstFieldName = remapImportForRedirectDestination(dstFieldName, imports);
+                String[] dstOwnerAndName = remapImportForRedirectDestination(dstFieldName, imports);
                 String mappingsOwner = getMappingsOwnerIfPresent(fieldRedirectValue); //TODO: support if required at some point
 
-                output.addRedirect(new RedirectSet.FieldRedirect(field, dstFieldName));
+                output.addRedirect(new FieldRedirect(field, dstOwnerAndName[0], dstOwnerAndName[1]));
             } else {
                 throw new RedirectsParseException(String.format("Field redirect value has invalid structure: %s", value));
             }
@@ -279,8 +282,8 @@ public class RedirectsParser {
             JsonElement value = methodRedirect.getValue();
             if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
                 String dstMethodName = throwOnLengthZero(value.getAsString(), () -> String.format("Method redirect has zero length value for key %s", methodRedirect));
-                dstMethodName = remapImportForRedirectDestination(dstMethodName, imports);
-                output.addRedirect(new RedirectSet.MethodRedirect(method, dstMethodName));
+                String [] dstOwnerAndName = remapImportForRedirectDestination(dstMethodName, imports);
+                output.addRedirect(new MethodRedirect(method, dstOwnerAndName[0], dstOwnerAndName[1], false));
             } else if (value.isJsonObject()) { // method redirect might contain a mappings owner
                 JsonObject methodRedirectValue = value.getAsJsonObject();
 
@@ -292,17 +295,23 @@ public class RedirectsParser {
                     throw new RedirectsParseException(String.format("Method redirect value does not contain a valid \"%s\". %s", DST_NAME, newNameNode));
                 }
 
+                JsonElement isDstInterfaceNode = methodRedirectValue.has(IS_DST_INTERFACE_NAME) ? methodRedirectValue.get(IS_DST_INTERFACE_NAME) : null;
+                if (isDstInterfaceNode != null && (!isDstInterfaceNode.isJsonPrimitive() || !isDstInterfaceNode.getAsJsonPrimitive().isBoolean())) {
+                    throw new RedirectsParseException(String.format("Method redirect value contains an invalid \"%s\". %s", IS_DST_INTERFACE_NAME, newNameNode));
+                }
+                boolean isDstInterface = isDstInterfaceNode != null && isDstInterfaceNode.getAsBoolean();
+
                 String dstMethodName = throwOnLengthZero(newNameNode.getAsString(), () -> String.format("Method redirect has zero length value for key %s", methodRedirect));
-                dstMethodName = remapImportForRedirectDestination(dstMethodName, imports);
+                String[] dstOwnerAndName = remapImportForRedirectDestination(dstMethodName, imports);
                 String mappingsOwner = getMappingsOwnerIfPresent(methodRedirectValue);
 
-                output.addRedirect(new RedirectSet.MethodRedirect(
+                output.addRedirect(new MethodRedirect(
                         new Transformer.ClassMethod(
                                 method.owner,
                                 method.method,
                                 mappingsOwner == null ? method.owner : getTypeFromName(resolveType(mappingsOwner, imports))
                         ),
-                        dstMethodName
+                        dstOwnerAndName[0], dstOwnerAndName[1], isDstInterface
                 ));
             } else {
                 throw new RedirectsParseException(String.format("Could not parse Method redirect %s", methodRedirect));
@@ -310,15 +319,15 @@ public class RedirectsParser {
         }
     }
 
-    private String remapImportForRedirectDestination(String dstName, Map<String, String> imports) throws RedirectsParseException {
+    private String[] remapImportForRedirectDestination(String dstName, Map<String, String> imports) throws RedirectsParseException {
         if (!dstName.contains(".")) {
-            return dstName;
+            return new String[]{null, dstName};
         }
         int lastDot = dstName.lastIndexOf('.');
         String newOwner = dstName.substring(0, lastDot);
         newOwner = resolveType(newOwner, imports);
         String newName = dstName.substring(lastDot + 1);
-        return newOwner + "." + newName;
+        return new String[]{newOwner, newName};
     }
 
     private static Map<String, String> parseImports(JsonArray importArray) throws RedirectsParseException {
@@ -691,121 +700,5 @@ public class RedirectsParser {
             return Collections.unmodifiableList(methodRedirects);
         }
 
-        public static final class TypeRedirect {
-            private String srcClassName;
-            private String dstClassName;
-
-            public TypeRedirect(String srcClassName, String dstClassName) {
-                this.srcClassName = srcClassName;
-                this.dstClassName = dstClassName;
-            }
-
-            public String srcClassName() {
-                return srcClassName;
-            }
-
-            public String dstClassName() {
-                return dstClassName;
-            }
-
-            @Override
-            public boolean equals(Object obj) {
-                if (obj == this) return true;
-                if (obj == null || obj.getClass() != this.getClass()) return false;
-                TypeRedirect that = (TypeRedirect) obj;
-                return Objects.equals(this.srcClassName, that.srcClassName) &&
-                        Objects.equals(this.dstClassName, that.dstClassName);
-            }
-
-            @Override
-            public int hashCode() {
-                return Objects.hash(srcClassName, dstClassName);
-            }
-
-            @Override
-            public String toString() {
-                return "TypeRedirect[" +
-                        "srcClassName=" + srcClassName + ", " +
-                        "dstClassName=" + dstClassName + ']';
-            }
-        }
-
-        public static final class FieldRedirect {
-            private final Transformer.ClassField field;
-            private final String dstFieldName;
-
-            public FieldRedirect(Transformer.ClassField field, String dstFieldName) {
-                this.field = field;
-                this.dstFieldName = dstFieldName;
-            }
-
-            public Transformer.ClassField field() {
-                return field;
-            }
-
-            public String dstFieldName() {
-                return dstFieldName;
-            }
-
-            @Override
-            public String toString() {
-                return "FieldRedirect{" +
-                        "field=" + field +
-                        ", dstFieldName='" + dstFieldName + '\'' +
-                        '}';
-            }
-
-            @Override
-            public boolean equals(Object o) {
-                if (this == o) return true;
-                if (o == null || getClass() != o.getClass()) return false;
-                FieldRedirect that = (FieldRedirect) o;
-                return Objects.equals(field, that.field) && Objects.equals(dstFieldName, that.dstFieldName);
-            }
-
-            @Override
-            public int hashCode() {
-                return Objects.hash(field, dstFieldName);
-            }
-        }
-
-        public static final class MethodRedirect {
-            private final Transformer.ClassMethod method;
-            private final String dstMethodName;
-
-            public MethodRedirect(Transformer.ClassMethod method, String dstMethodName) {
-                this.method = method;
-                this.dstMethodName = dstMethodName;
-            }
-
-            public Transformer.ClassMethod method() {
-                return method;
-            }
-
-            public String dstMethodName() {
-                return dstMethodName;
-            }
-
-            @Override
-            public String toString() {
-                return "MethodRedirect{" +
-                        "method=" + method +
-                        ", dstMethodName='" + dstMethodName + '\'' +
-                        '}';
-            }
-
-            @Override
-            public boolean equals(Object o) {
-                if (this == o) return true;
-                if (o == null || getClass() != o.getClass()) return false;
-                MethodRedirect that = (MethodRedirect) o;
-                return Objects.equals(method, that.method) && Objects.equals(dstMethodName, that.dstMethodName);
-            }
-
-            @Override
-            public int hashCode() {
-                return Objects.hash(method, dstMethodName);
-            }
-        }
     }
 }

@@ -3,9 +3,9 @@ package io.github.opencubicchunks.dasm.test;
 import com.google.gson.JsonElement;
 import io.github.opencubicchunks.dasm.RedirectsParser;
 import io.github.opencubicchunks.dasm.RedirectsParser.RedirectSet;
-import io.github.opencubicchunks.dasm.RedirectsParser.RedirectSet.FieldRedirect;
-import io.github.opencubicchunks.dasm.RedirectsParser.RedirectSet.MethodRedirect;
-import io.github.opencubicchunks.dasm.RedirectsParser.RedirectSet.TypeRedirect;
+import io.github.opencubicchunks.dasm.FieldRedirect;
+import io.github.opencubicchunks.dasm.MethodRedirect;
+import io.github.opencubicchunks.dasm.TypeRedirect;
 import io.github.opencubicchunks.dasm.test.utils.Utils;
 import org.junit.jupiter.api.Test;
 
