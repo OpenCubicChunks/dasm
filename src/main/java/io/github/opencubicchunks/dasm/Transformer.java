@@ -333,17 +333,27 @@ public class Transformer {
                 String bootstrapMethodOwner = invoke.bsm.getOwner();
                 if (bootstrapMethodName.equals("metafactory") && bootstrapMethodOwner.equals("java/lang/invoke/LambdaMetafactory")) {
                     for (Object bsmArg : invoke.bsmArgs) {
-                        if (bsmArg instanceof Handle) {
-                            Handle handle = (Handle) bsmArg;
-                            String owner = handle.getOwner();
-                            if (owner.equals(node.name)) {
-                                String newName = "dasm$redirect$" + handle.getName();
-                                lambdaRedirects.put(handle, newName);
-                                cloneAndApplyRedirects(node, new ClassMethod(Type.getObjectType(handle.getOwner()),
-                                                new Method(handle.getName(), handle.getDesc())),
-                                        newName, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn, debugLogging);
-                            }
+                        if (!(bsmArg instanceof Handle)) {
+                            continue;
                         }
+                        Handle handle = (Handle) bsmArg;
+                        String owner = handle.getOwner();
+                        if (!owner.equals(node.name)) {
+                            continue;
+                        }
+                        String name = handle.getName();
+                        String desc = handle.getDesc();
+                        // ignore method references into own class
+                        MethodNode targetNode =
+                            node.methods.stream().filter(m -> m.name.equals(name) && m.desc.equals(desc)).findFirst().orElse(null);
+                        if (targetNode == null || (targetNode.access & ACC_SYNTHETIC) == 0) {
+                            continue;
+                        }
+                        String newName = "dasm$redirect$" + name;
+                        lambdaRedirects.put(handle, newName);
+                        cloneAndApplyRedirects(node, new ClassMethod(Type.getObjectType(handle.getOwner()),
+                                        new Method(name, desc)),
+                                newName, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn, debugLogging);
                     }
                 }
             }
