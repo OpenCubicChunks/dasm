@@ -260,7 +260,7 @@ public class Transformer {
         node.methods.clear();
 
         ClassVisitor cv = new ClassRemapper(node, remapper);
-        cv = new ClassVisitor(ASM7, cv) {
+        cv = new ClassVisitor(ASM9, cv) {
             @Override public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
                 return new RedirectVisitor(super.visitMethod(access, name, descriptor, signature, exceptions), methodRedirectsIn, fieldRedirectsIn);
             }

@@ -34,7 +34,7 @@ public class RedirectsParser {
         return parseRedirectSet(json, new JsonArray());
     }
 
-    public List<RedirectSet> parseRedirectSet(JsonObject json, JsonElement globalImports) throws RedirectsParseException {
+    public List<RedirectSet> parseRedirectSet(JsonObject json, @NotNull JsonElement globalImports) throws RedirectsParseException {
         List<RedirectSet> redirectSets = new ArrayList<>();
         for (Map.Entry<String, JsonElement> classRedirectObject : json.entrySet()) {
             String redirectSetName = throwOnLengthZero(classRedirectObject.getKey(), () -> "Redirect Set node has empty name");
@@ -83,7 +83,7 @@ public class RedirectsParser {
         return parseClassTargets(json, new JsonArray());
     }
 
-    public List<ClassTarget> parseClassTargets(JsonObject json, JsonElement globalImports) throws RedirectsParseException {
+    public List<ClassTarget> parseClassTargets(JsonObject json, @NotNull JsonElement globalImports) throws RedirectsParseException {
         Map<String, String> imports;
         if (json.has(IMPORTS_NAME)) {
             imports = parseImports(json.get(IMPORTS_NAME));
