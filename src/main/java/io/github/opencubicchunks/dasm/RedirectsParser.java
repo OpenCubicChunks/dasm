@@ -416,9 +416,7 @@ public class RedirectsParser {
         String s = throwOnLengthZero(in, () -> "Signature has zero length");
 
         try {
-            System.err.println("in: " + in);
             String signature = applyImportsToMethodSignature(in, imports);
-            System.err.println("out: " + signature);
             Method method = Method.getMethod(signature);
 
             String ownerTypeName = resolveType(owner, imports);
