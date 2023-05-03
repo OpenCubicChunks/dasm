@@ -6,7 +6,6 @@ import java.util.function.Supplier;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.commons.Method;
@@ -29,10 +28,10 @@ public class RedirectsParser {
     private static final String IS_DST_INTERFACE_NAME = "isDstInterface";
 
     public List<RedirectSet> parseRedirectSet(JsonObject json) throws RedirectsParseException {
-        return parseRedirectSet(json, new HashSet<>());
+        return parseRedirectSet(json, new JsonArray());
     }
 
-    public List<RedirectSet> parseRedirectSet(JsonObject json, Set<String> globalImports) throws RedirectsParseException {
+    public List<RedirectSet> parseRedirectSet(JsonObject json, JsonElement globalImports) throws RedirectsParseException {
         List<RedirectSet> redirectSets = new ArrayList<>();
         for (Map.Entry<String, JsonElement> classRedirectObject : json.entrySet()) {
             String redirectSetName = throwOnLengthZero(classRedirectObject.getKey(), () -> "Redirect Set node has empty name");
@@ -47,22 +46,11 @@ public class RedirectsParser {
 
             Map<String, String> imports;
             if (redirectJson.has(IMPORTS_NAME)) {
-                if (!redirectJson.get(IMPORTS_NAME).isJsonArray()) {
-                    throw new RedirectsParseException(String.format("Redirect set has non-array \"%s\" object", IMPORTS_NAME));
-                }
-
-                JsonArray importArray = redirectJson.get(IMPORTS_NAME).getAsJsonArray();
-                imports = parseImports(importArray);
+                imports = parseImports(redirectJson.get(IMPORTS_NAME));
             } else {
                 imports = new HashMap<>();
             }
-            for (String importString : globalImports) {
-                String importKey = getImportKey(importString);
-                if (imports.containsKey(importKey)) {
-                    throw new RedirectsParseException(String.format("Illegal duplicate (global+local) import \"%s\" -> \"%s\"", importKey, importString));
-                }
-                imports.put(importKey, importString);
-            }
+            imports.putAll(parseImports(globalImports));
 
             if (!redirectJson.has(TYPE_REDIRECTS_NAME) || !redirectJson.get(TYPE_REDIRECTS_NAME).isJsonObject()) {
                 throw new RedirectsParseException(String.format("Redirect set has no \"%s\" object", TYPE_REDIRECTS_NAME));
@@ -89,28 +77,17 @@ public class RedirectsParser {
     }
 
     public List<ClassTarget> parseClassTargets(JsonObject json) throws RedirectsParseException {
-        return parseClassTargets(json, new HashSet<>());
+        return parseClassTargets(json, new JsonArray());
     }
 
-    public List<ClassTarget> parseClassTargets(JsonObject json, Set<String> globalImports) throws RedirectsParseException {
+    public List<ClassTarget> parseClassTargets(JsonObject json, JsonElement globalImports) throws RedirectsParseException {
         Map<String, String> imports;
         if (json.has(IMPORTS_NAME)) {
-            if (!json.get(IMPORTS_NAME).isJsonArray()) {
-                throw new RedirectsParseException(String.format("Targets has non-array \"%s\" object", IMPORTS_NAME));
-            }
-
-            JsonArray importArray = json.get(IMPORTS_NAME).getAsJsonArray();
-            imports = parseImports(importArray);
+            imports = parseImports(json.get(IMPORTS_NAME));
         } else {
             imports = new HashMap<>();
         }
-        for (String importString : globalImports) {
-            String importKey = getImportKey(importString);
-            if (imports.containsKey(importKey)) {
-                throw new RedirectsParseException(String.format("Illegal duplicate (global+local) import \"%s\" -> \"%s\"", importKey, importString));
-            }
-            imports.put(importKey, importString);
-        }
+        imports.putAll(parseImports(globalImports));
 
         List<ClassTarget> classTargets = new ArrayList<>();
         List<String> defaultSets = new ArrayList<>();
@@ -330,7 +307,39 @@ public class RedirectsParser {
         return new String[]{newOwner, newName};
     }
 
-    private static Map<String, String> parseImports(JsonArray importArray) throws RedirectsParseException {
+    private static Map<String, String> parseImports(JsonElement imports) throws RedirectsParseException {
+        if (imports.isJsonArray()) {
+            return parseImportArray(imports.getAsJsonArray());
+        } else if (imports.isJsonObject()) {
+            return parseImportObject(imports.getAsJsonObject());
+        }
+        throw new RedirectsParseException(String.format("Illegal %s element: `%s`", IMPORTS_NAME, imports));
+    }
+
+    @NotNull
+    private static Map<String, String> parseImportObject(JsonObject importsObject) throws RedirectsParseException {
+        Map<String, String> imports = new HashMap<>();
+        for (Map.Entry<String, JsonElement> importPair : importsObject.entrySet()) {
+            String importKey = importPair.getKey();
+            JsonElement importStringElement = importPair.getValue();
+
+            if (!importStringElement.isJsonPrimitive() || !importStringElement.getAsJsonPrimitive().isString()) {
+                throw new RedirectsParseException(String.format("Illegal mapped import \"%s\" -> \"%s\"", importKey, importStringElement));
+            }
+
+            String importString = importStringElement.getAsString();
+
+            if (imports.containsKey(importKey)) {
+                throw new RedirectsParseException(String.format("Illegal duplicate import \"%s\" -> \"%s\"", importKey, importString));
+            }
+            System.err.printf("Parsed import: `%s` -> `%s`%n", importKey, importString);
+            imports.put(importKey, importString);
+        }
+        return imports;
+    }
+
+    @NotNull
+    private static Map<String, String> parseImportArray(JsonArray importArray) throws RedirectsParseException {
         Map<String, String> imports = new HashMap<>();
 
         for (JsonElement jsonElement : importArray) {
@@ -345,7 +354,6 @@ public class RedirectsParser {
                 throw new RedirectsParseException(String.format("Invalid object in redirect set %s \"%s\"", IMPORTS_NAME, jsonElement));
             }
         }
-
         return imports;
     }
 
