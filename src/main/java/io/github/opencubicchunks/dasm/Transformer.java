@@ -1,6 +1,8 @@
 package io.github.opencubicchunks.dasm;
 
 import com.google.common.collect.Sets;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.Handle;
@@ -15,13 +17,12 @@ import org.objectweb.asm.commons.Remapper;
 import org.objectweb.asm.tree.*;
 
 import java.util.*;
-import java.util.logging.Logger;
 
 import static org.objectweb.asm.Opcodes.*;
 import static org.objectweb.asm.Type.*;
 
 public class Transformer {
-    private static final Logger LOGGER = Logger.getLogger(Transformer.class.getName());
+    private static final Logger LOGGER = LogManager.getLogger();
 
     private final MappingsProvider mappingsProvider;
     private final boolean globalLogSelfRedirects;
