@@ -183,8 +183,8 @@ public class Transformer {
         mv = new RedirectVisitor(mv, methodRedirects, fieldRedirectsIn);
         originalMethod.accept(mv);
         output.name = newName;
-        // remove protected and private, add public
-        output.access &= ~(ACC_PROTECTED | ACC_PRIVATE);
+        // remove protected, private, and native; add public
+        output.access &= ~(ACC_PROTECTED | ACC_PRIVATE | ACC_NATIVE);
         output.access |= ACC_PUBLIC;
 
         node.methods.remove(originalMethod);
