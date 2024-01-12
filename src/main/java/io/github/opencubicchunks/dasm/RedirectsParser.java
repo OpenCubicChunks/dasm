@@ -594,7 +594,8 @@ public class RedirectsParser {
             @Override
             public String toString() {
                 return "TargetMethod{" +
-                        "method=" + method +
+                        "srcOwner=" + srcOwner +
+                        ", method=" + method +
                         ", dstMethodName='" + dstMethodName + '\'' +
                         ", shouldClone=" + shouldClone +
                         ", makeSyntheticAccessor=" + makeSyntheticAccessor +
@@ -606,12 +607,12 @@ public class RedirectsParser {
                 if (this == o) return true;
                 if (o == null || getClass() != o.getClass()) return false;
                 TargetMethod that = (TargetMethod) o;
-                return shouldClone == that.shouldClone && makeSyntheticAccessor == that.makeSyntheticAccessor && Objects.equals(method, that.method) && Objects.equals(dstMethodName, that.dstMethodName);
+                return shouldClone == that.shouldClone && makeSyntheticAccessor == that.makeSyntheticAccessor && Objects.equals(srcOwner, that.srcOwner) && Objects.equals(method, that.method) && Objects.equals(dstMethodName, that.dstMethodName);
             }
 
             @Override
             public int hashCode() {
-                return Objects.hash(method, dstMethodName, shouldClone, makeSyntheticAccessor);
+                return Objects.hash(srcOwner, method, dstMethodName, shouldClone, makeSyntheticAccessor);
             }
         }
     }
@@ -654,5 +655,17 @@ public class RedirectsParser {
             return Collections.unmodifiableList(methodRedirects);
         }
 
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            RedirectSet that = (RedirectSet) o;
+            return Objects.equals(name, that.name);
+        }
+
+        @Override
+        public int hashCode() {
+            return name.hashCode();
+        }
     }
 }
