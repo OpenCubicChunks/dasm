@@ -156,7 +156,7 @@ public class RedirectsParser {
                 Set<Map.Entry<String, JsonElement>> targetMethodsNode = classTargetNode.get(TARGET_METHODS_NAME).getAsJsonObject().entrySet();
                 parseTargetMethods(classTarget, targetMethodsNode, imports);
             } else {
-                classTarget.targetWholeClass();
+//                classTarget.targetWholeClass();
             }
 
             classTargets.add(classTarget);
@@ -497,7 +497,7 @@ public class RedirectsParser {
         private final List<String> usesSets = new ArrayList<>();
         private boolean debugSelfRedirects = false;
         private final List<TargetMethod> targetMethods = new ArrayList<>();
-        private boolean wholeClass = false;
+        private Type wholeClass = null;
 
         public ClassTarget(String className) {
             this.className = className;
@@ -512,7 +512,7 @@ public class RedirectsParser {
         }
 
         public void addTarget(TargetMethod targetMethod) {
-            if (wholeClass) {
+            if (wholeClass != null) {
                 throw new IllegalStateException("Cannot add target methods when targeting whole class!");
             }
             this.targetMethods.add(targetMethod);
@@ -521,11 +521,11 @@ public class RedirectsParser {
         /**
          * Specifies targeting a whole class, without cloning methods. Allows in-place redirects for the whole class
          */
-        public void targetWholeClass() {
+        public void targetWholeClass(Type srcClass) {
             if (!targetMethods.isEmpty()) {
                 throw new IllegalStateException("Cannot add target whole class when method targets are specified!");
             }
-            wholeClass = true;
+            wholeClass = srcClass;
         }
 
         public String getClassName() {
@@ -540,7 +540,7 @@ public class RedirectsParser {
             this.debugSelfRedirects = debugSelfRedirects;
         }
 
-        public boolean isWholeClass() {
+        public Type wholeClass() {
             return wholeClass;
         }
 

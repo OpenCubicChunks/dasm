@@ -57,8 +57,14 @@ public class Transformer {
             }
         }
 
-        if (target.isWholeClass()) {
-            applyWholeClassRedirects(targetClass, methodRedirects, fieldRedirects, typeRedirects, target.debugSelfRedirects());
+        if (target.wholeClass() != null) {
+            String srcName = target.wholeClass().getClassName();
+            applyWholeClassRedirects(this.classProviderCache.computeIfAbsent(srcName, n -> {
+                ClassNode dst = new ClassNode(ASM9);
+                final ClassReader classReader = new ClassReader(this.classProvider.classBytes(srcName));
+                classReader.accept(dst, 0);
+                return dst;
+            }), targetClass, methodRedirects, fieldRedirects, typeRedirects, target.debugSelfRedirects());
         } else {
             target.getTargetMethods().forEach(targetMethod -> {
                 String newName = targetMethod.dstMethodName();
@@ -236,48 +242,51 @@ public class Transformer {
     }
 
 
-    private void applyWholeClassRedirects(ClassNode node,
+    private void applyWholeClassRedirects(ClassNode srcNode, ClassNode targetNode,
                                           Map<ClassMethod, MethodRedirect> methodRedirectsIn,
                                           Map<ClassField, FieldRedirect> fieldRedirectsIn,
                                           Map<Type, Type> typeRedirectsIn, boolean debugLogging) {
 
-        LOGGER.info("Transforming " + node.name + ": Transforming whole class");
+        LOGGER.info("Transforming (" + srcNode.name + "->" + targetNode.name + "): Transforming whole class");
 
-        Remapper remapper = new RedirectingRemapper(node, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn, debugLogging);
+        Remapper remapper = new RedirectingRemapper(srcNode, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn, debugLogging);
 
         ClassNode oldNode = new ClassNode(ASM9);
-        node.accept(oldNode);
+        targetNode.accept(oldNode);
+        // Remove default empty constructor
+        oldNode.methods.removeIf(methodNode -> methodNode.name.equals("<init>") && methodNode.desc.equals("()V"));
 
-        node.access = 0;
-        node.name = null;
-        node.signature = null;
-        node.superName = null;
-        node.interfaces.clear();
-        node.sourceFile = null;
-        node.sourceDebug = null;
-        node.module = null;
-        node.outerClass = null;
-        node.outerMethod = null;
-        node.outerMethodDesc = null;
-        node.visibleAnnotations = null;
-        node.invisibleAnnotations = null;
-        node.visibleTypeAnnotations = null;
-        node.invisibleTypeAnnotations = null;
-        node.attrs = null;
-        node.innerClasses.clear();
-        node.nestHostClass = null;
-        node.nestMembers = null;
-        node.permittedSubclasses = null;
-        node.recordComponents = null;
-        node.fields.clear();
-        node.methods.clear();
+        targetNode.access = 0;
+        targetNode.name = null;
+        targetNode.signature = null;
+        targetNode.superName = null;
+        targetNode.interfaces.clear();
+        targetNode.sourceFile = null;
+        targetNode.sourceDebug = null;
+        targetNode.module = null;
+        targetNode.outerClass = null;
+        targetNode.outerMethod = null;
+        targetNode.outerMethodDesc = null;
+        targetNode.visibleAnnotations = null;
+        targetNode.invisibleAnnotations = null;
+        targetNode.visibleTypeAnnotations = null;
+        targetNode.invisibleTypeAnnotations = null;
+        targetNode.attrs = null;
+        targetNode.innerClasses.clear();
+        targetNode.nestHostClass = null;
+        targetNode.nestMembers = null;
+        targetNode.permittedSubclasses = null;
+        targetNode.recordComponents = null;
+        targetNode.fields.clear();
+        targetNode.methods.clear();
 
-        ClassVisitor cv = new ClassRemapper(node, remapper);
+        ClassVisitor cv = new ClassRemapper(targetNode, remapper);
         cv = new ClassVisitor(ASM9, cv) {
             @Override public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
                 return new RedirectVisitor(super.visitMethod(access, name, descriptor, signature, exceptions), methodRedirectsIn, fieldRedirectsIn);
             }
         };
+        srcNode.accept(cv);
         oldNode.accept(cv);
     }
 
