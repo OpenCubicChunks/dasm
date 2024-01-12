@@ -549,16 +549,30 @@ public class RedirectsParser {
         }
 
         public static final class TargetMethod {
+            private final Type srcOwner;
             private final Transformer.ClassMethod method;
             private final String dstMethodName;
             private final boolean shouldClone;
             private final boolean makeSyntheticAccessor;
 
             public TargetMethod(Transformer.ClassMethod method, String dstMethodName, boolean shouldClone, boolean makeSyntheticAccessor) {
+                this.srcOwner = method.owner;
                 this.method = method;
                 this.dstMethodName = dstMethodName;
                 this.shouldClone = shouldClone;
                 this.makeSyntheticAccessor = makeSyntheticAccessor;
+            }
+
+            public TargetMethod(Type srcOwner, Transformer.ClassMethod method, String dstMethodName, boolean shouldClone, boolean makeSyntheticAccessor) {
+                this.srcOwner = srcOwner;
+                this.method = method;
+                this.dstMethodName = dstMethodName;
+                this.shouldClone = shouldClone;
+                this.makeSyntheticAccessor = makeSyntheticAccessor;
+            }
+
+            public Type srcOwner() {
+                return srcOwner;
             }
 
             public String dstMethodName() {

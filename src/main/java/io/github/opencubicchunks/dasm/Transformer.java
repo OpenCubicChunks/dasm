@@ -1,20 +1,16 @@
 package io.github.opencubicchunks.dasm;
 
 import com.google.common.collect.Sets;
+import io.github.opencubicchunks.dasm.api.ClassProvider;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
-import org.objectweb.asm.ClassVisitor;
-import org.objectweb.asm.Handle;
-import org.objectweb.asm.Label;
-import org.objectweb.asm.MethodVisitor;
-import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.Type;
+import org.objectweb.asm.*;
 import org.objectweb.asm.commons.ClassRemapper;
 import org.objectweb.asm.commons.Method;
 import org.objectweb.asm.commons.MethodRemapper;
 import org.objectweb.asm.commons.Remapper;
-import org.objectweb.asm.tree.*;
+import org.objectweb.asm.tree. *;
 
 import java.util.*;
 
@@ -25,14 +21,17 @@ public class Transformer {
     private static final Logger LOGGER = LogManager.getLogger();
 
     private final MappingsProvider mappingsProvider;
+    private final ClassProvider classProvider;
+    private final Map<String, ClassNode> classProviderCache = new HashMap<>();
     private final boolean globalLogSelfRedirects;
 
     /**
      * @param mappingsProvider The mappings provider to use
      * @param globalLogSelfRedirects A global toggle for self redirects logging
      */
-    public Transformer(MappingsProvider mappingsProvider, boolean globalLogSelfRedirects) {
+    public Transformer(MappingsProvider mappingsProvider, ClassProvider classProvider, boolean globalLogSelfRedirects) {
         this.mappingsProvider = mappingsProvider;
+        this.classProvider = classProvider;
         this.globalLogSelfRedirects = globalLogSelfRedirects;
     }
 
@@ -63,10 +62,23 @@ public class Transformer {
         } else {
             target.getTargetMethods().forEach(targetMethod -> {
                 String newName = targetMethod.dstMethodName();
+                Type srcOwner = targetMethod.srcOwner();
+
+                ClassNode srcClass;
+                if (srcOwner == targetMethod.method().owner) {
+                    srcClass = targetClass;
+                } else {
+                    srcClass = this.classProviderCache.computeIfAbsent(srcOwner.getClassName(), n -> {
+                        ClassNode dst = new ClassNode(ASM9);
+                        final ClassReader classReader = new ClassReader(this.classProvider.classBytes(srcOwner.getClassName()));
+                        classReader.accept(dst, 0);
+                        return dst;
+                    });
+                }
 
                 MethodNode method;
                 if (targetMethod.shouldClone()) {
-                    method = cloneAndApplyRedirects(targetClass, targetMethod.method(), newName,
+                    method = cloneAndApplyRedirects(srcClass, targetClass, targetMethod.method(), newName,
                             methodRedirects,
                             fieldRedirects,
                             typeRedirects, target.debugSelfRedirects());
@@ -104,25 +116,25 @@ public class Transformer {
         node.methods.add(newNode);
     }
 
-    private MethodNode cloneAndApplyRedirects(ClassNode node, ClassMethod existingMethodIn, String newName,
+    private MethodNode cloneAndApplyRedirects(ClassNode srcOwner, ClassNode targetClass, ClassMethod existingMethodIn, String newName,
                                               Map<ClassMethod, MethodRedirect> methodRedirectsIn, Map<ClassField, FieldRedirect> fieldRedirectsIn,
                                               Map<Type, Type> typeRedirectsIn, boolean debugLogging) {
-        LOGGER.info("Transforming " + node.name + ": Cloning method " + existingMethodIn.method.getName() + " " + existingMethodIn.method.getDescriptor() + " "
+        LOGGER.info("Transforming (" + srcOwner.name + "->" + targetClass.name + "): Cloning method " + existingMethodIn.method.getName() + " " + existingMethodIn.method.getDescriptor() + " "
                 + "into " + newName + " and applying remapping");
         Method existingMethod = remapMethod(existingMethodIn).method;
 
-        MethodNode originalMethod = node.methods.stream()
+        MethodNode originalMethod = srcOwner.methods.stream()
                 .filter(x -> existingMethod.getName().equals(x.name) && existingMethod.getDescriptor().equals(x.desc))
                 .findAny().orElseThrow(() -> new IllegalStateException("Target method " + existingMethod + " not found"));
 
-        Map<Handle, String> redirectedLambdas = cloneAndApplyLambdaRedirects(node, originalMethod, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn, debugLogging);
+        Map<Handle, String> redirectedLambdas = cloneAndApplyLambdaRedirects(srcOwner, targetClass, originalMethod, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn, debugLogging);
         Map<ClassMethod, MethodRedirect> methodRedirects = addLambdaMethodRedirects(methodRedirectsIn, redirectedLambdas);
 
-        Remapper remapper = new RedirectingRemapper(node, methodRedirects, fieldRedirectsIn, typeRedirectsIn, debugLogging);
+        Remapper remapper = new RedirectingRemapper(srcOwner, methodRedirects, fieldRedirectsIn, typeRedirectsIn, debugLogging);
 
         String mappedDesc = mapMethodDesc(originalMethod, remapper);
 
-        MethodNode existingOutput = removeExistingMethod(node, newName, mappedDesc);
+        MethodNode existingOutput = removeExistingMethod(targetClass, newName, mappedDesc);
         MethodNode output;
         if (existingOutput != null && existingOutput.visibleAnnotations != null) {
             // Remove stub annotations, they may be added by stirrin if this is a stub
@@ -151,7 +163,7 @@ public class Transformer {
         // remove protected and private, add public
         output.access &= ~(ACC_PROTECTED | ACC_PRIVATE);
         output.access |= ACC_PUBLIC;
-        node.methods.add(output);
+        targetClass.methods.add(output);
 
         return output;
     }
@@ -167,7 +179,7 @@ public class Transformer {
                 .filter(x -> existingMethod.getName().equals(x.name) && existingMethod.getDescriptor().equals(x.desc))
                 .findAny().orElseThrow(() -> new IllegalStateException("Target method " + existingMethod + " not found"));
 
-        Map<Handle, String> redirectedLambdas = cloneAndApplyLambdaRedirects(node, originalMethod, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn, debugLogging);
+        Map<Handle, String> redirectedLambdas = cloneAndApplyLambdaRedirects(node, node, originalMethod, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn, debugLogging);
         Map<ClassMethod, MethodRedirect> methodRedirects = addLambdaMethodRedirects(methodRedirectsIn, redirectedLambdas);
 
         Remapper remapper = new RedirectingRemapper(node, methodRedirects, fieldRedirectsIn, typeRedirectsIn, debugLogging);
@@ -324,7 +336,8 @@ public class Transformer {
         return Type.getObjectType(mapped.replace('.', '/'));
     }
 
-    private Map<Handle, String> cloneAndApplyLambdaRedirects(ClassNode node, MethodNode method, Map<ClassMethod, MethodRedirect> methodRedirectsIn,
+    private Map<Handle, String> cloneAndApplyLambdaRedirects(ClassNode srcOwner, ClassNode targetClass, MethodNode method,
+                                                             Map<ClassMethod, MethodRedirect> methodRedirectsIn,
                                                              Map<ClassField, FieldRedirect> fieldRedirectsIn, Map<Type, Type> typeRedirectsIn,
                                                              boolean debugLogging) {
         Map<Handle, String> lambdaRedirects = new HashMap<>();
@@ -340,20 +353,20 @@ public class Transformer {
                         }
                         Handle handle = (Handle) bsmArg;
                         String owner = handle.getOwner();
-                        if (!owner.equals(node.name)) {
+                        if (!owner.equals(srcOwner.name)) {
                             continue;
                         }
                         String name = handle.getName();
                         String desc = handle.getDesc();
                         // ignore method references into own class
                         MethodNode targetNode =
-                            node.methods.stream().filter(m -> m.name.equals(name) && m.desc.equals(desc)).findFirst().orElse(null);
+                                srcOwner.methods.stream().filter(m -> m.name.equals(name) && m.desc.equals(desc)).findFirst().orElse(null);
                         if (targetNode == null || (targetNode.access & ACC_SYNTHETIC) == 0) {
                             continue;
                         }
                         String newName = "dasm$redirect$" + name;
                         lambdaRedirects.put(handle, newName);
-                        cloneAndApplyRedirects(node, new ClassMethod(Type.getObjectType(handle.getOwner()),
+                        cloneAndApplyRedirects(srcOwner, targetClass, new ClassMethod(Type.getObjectType(handle.getOwner()),
                                         new Method(name, desc)),
                                 newName, methodRedirectsIn, fieldRedirectsIn, typeRedirectsIn, debugLogging);
                     }
