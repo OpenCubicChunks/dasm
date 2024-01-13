@@ -164,6 +164,9 @@ public class Transformer {
         };
         mv = new MethodRemapper(mv, remapper);
         mv = new RedirectVisitor(mv, methodRedirects, fieldRedirectsIn);
+        // If the src and target differ, the caller will expect `this` to be the target class, not the source class, etc.
+        // If they don't differ, this is a complicated no-op:
+        mv = new DefaultRedirectVisitor(mv, srcOwner.name, targetClass.name, (targetClass.access & ACC_INTERFACE) != 0);
         originalMethod.accept(mv);
         output.name = newName;
         // remove protected and private, add public
@@ -283,7 +286,8 @@ public class Transformer {
         ClassVisitor cv = new ClassRemapper(targetNode, remapper);
         cv = new ClassVisitor(ASM9, cv) {
             @Override public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
-                return new RedirectVisitor(super.visitMethod(access, name, descriptor, signature, exceptions), methodRedirectsIn, fieldRedirectsIn);
+                RedirectVisitor redirectVisitor = new RedirectVisitor(super.visitMethod(access, name, descriptor, signature, exceptions), methodRedirectsIn, fieldRedirectsIn);
+                return new DefaultRedirectVisitor(redirectVisitor, srcNode.name, targetNode.name, (targetNode.access & ACC_INTERFACE) != 0);
             }
         };
         srcNode.accept(cv);
@@ -502,6 +506,37 @@ public class Transformer {
             System.arraycopy(argumentTypes, 0, newArgs, 1, argumentTypes.length);
             descriptor = Type.getMethodDescriptor(retType, newArgs);
             return descriptor;
+        }
+    }
+
+    private static class DefaultRedirectVisitor extends MethodVisitor {
+
+        private final String oldOwner;
+        private final String newOwner;
+        private final boolean newOwnerIsInterface;
+
+        public DefaultRedirectVisitor(MethodVisitor mv, String oldOwner, String newOwner, boolean newOwnerIsInterface) {
+            super(ASM7, mv);
+            this.oldOwner = oldOwner;
+            this.newOwner = newOwner;
+            this.newOwnerIsInterface = newOwnerIsInterface;
+        }
+
+        @Override public void visitFieldInsn(int opcode, String owner, String name, String descriptor) {
+            if (this.newOwnerIsInterface || !owner.equals(this.oldOwner)) {
+                super.visitFieldInsn(opcode, owner, name, descriptor);
+                return;
+            }
+            super.visitFieldInsn(opcode, newOwner, name, descriptor);
+        }
+
+        @Override public void visitMethodInsn(int opcode, String owner, String name, String descriptor, boolean isInterface) {
+            if (!owner.equals(this.oldOwner)) {
+                super.visitMethodInsn(opcode, owner, name, descriptor, isInterface);
+                return;
+            }
+
+            super.visitMethodInsn(opcode, this.newOwner, name, descriptor, newOwnerIsInterface);
         }
     }
 
