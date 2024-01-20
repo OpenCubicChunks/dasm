@@ -256,11 +256,9 @@ public class Transformer {
 
         ClassNode oldNode = new ClassNode(ASM9);
         targetNode.accept(oldNode);
-        // Remove default empty constructor
-        oldNode.methods.removeIf(methodNode -> methodNode.name.equals("<init>") && methodNode.desc.equals("()V"));
-        // Remove any methods/fields that will be added by the wholeclass redirect
-        oldNode.methods.removeIf(methodNode -> srcNode.methods.stream().anyMatch(node -> node.name.equals(methodNode.name) && node.desc.equals(methodNode.desc)));
-        oldNode.fields.removeIf(fieldNode -> srcNode.fields.stream().anyMatch(node -> node.name.equals(fieldNode.name) && node.desc.equals(fieldNode.desc)));
+
+        oldNode.methods.clear();
+        oldNode.fields.clear();
 
         targetNode.access = 0;
         targetNode.name = null;
