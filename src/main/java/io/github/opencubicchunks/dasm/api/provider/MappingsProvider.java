@@ -1,4 +1,4 @@
-package io.github.opencubicchunks.dasm;
+package io.github.opencubicchunks.dasm.api.provider;
 
 public interface MappingsProvider {
     MappingsProvider IDENTITY = new MappingsProvider() {

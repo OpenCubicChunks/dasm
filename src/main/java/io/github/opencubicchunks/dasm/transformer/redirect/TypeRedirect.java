@@ -1,4 +1,4 @@
-package io.github.opencubicchunks.dasm;
+package io.github.opencubicchunks.dasm.transformer.redirect;
 
 import java.util.Objects;
 

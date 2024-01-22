@@ -1,7 +1,14 @@
 package io.github.opencubicchunks.dasm;
 
 import com.google.common.collect.Sets;
-import io.github.opencubicchunks.dasm.api.ClassProvider;
+import io.github.opencubicchunks.dasm.api.provider.ClassProvider;
+import io.github.opencubicchunks.dasm.api.provider.MappingsProvider;
+import io.github.opencubicchunks.dasm.transformer.*;
+import io.github.opencubicchunks.dasm.transformer.redirect.FieldRedirect;
+import io.github.opencubicchunks.dasm.transformer.redirect.MethodRedirect;
+import io.github.opencubicchunks.dasm.transformer.redirect.RedirectSet;
+import io.github.opencubicchunks.dasm.transformer.redirect.TypeRedirect;
+import io.github.opencubicchunks.dasm.transformer.target.TargetClass;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
@@ -35,27 +42,11 @@ public class Transformer {
         this.globalLogSelfRedirects = globalLogSelfRedirects;
     }
 
-    public void transformClass(ClassNode targetClass, RedirectsParser.ClassTarget target, List<RedirectsParser.RedirectSet> redirectSets) {
-        Map<Type, Type> typeRedirects = new HashMap<>();
-        Map<ClassField, FieldRedirect> fieldRedirects = new HashMap<>();
-        Map<ClassMethod, MethodRedirect> methodRedirects = new HashMap<>();
-
-        for (RedirectsParser.RedirectSet redirectSet : redirectSets) {
-            for (TypeRedirect typeRedirect : redirectSet.getTypeRedirects()) {
-                typeRedirects.put(
-                        getObjectType(mappingsProvider.mapClassName(typeRedirect.srcClassName())),
-                        getObjectType(mappingsProvider.mapClassName(typeRedirect.dstClassName()))
-                );
-            }
-
-            for (FieldRedirect fieldRedirect : redirectSet.getFieldRedirects()) {
-                fieldRedirects.put(fieldRedirect.field(), fieldRedirect);
-            }
-
-            for (MethodRedirect methodRedirect : redirectSet.getMethodRedirects()) {
-                methodRedirects.put(methodRedirect.method(), methodRedirect);
-            }
-        }
+    public void transformClass(ClassNode targetClass, TargetClass target) {
+        Map<Type, Type> classTypeRedirects = new HashMap<>();
+        Map<ClassField, FieldRedirect> classFieldRedirects = new HashMap<>();
+        Map<ClassMethod, MethodRedirect> classMethodRedirects = new HashMap<>();
+        buildRedirects(target.redirectSets(), classTypeRedirects, classFieldRedirects, classMethodRedirects);
 
         if (target.wholeClass() != null) {
             String srcName = target.wholeClass().getClassName();
@@ -64,9 +55,16 @@ public class Transformer {
                 final ClassReader classReader = new ClassReader(this.classProvider.classBytes(srcName));
                 classReader.accept(dst, 0);
                 return dst;
-            }), targetClass, methodRedirects, fieldRedirects, typeRedirects, target.debugSelfRedirects());
+            }), targetClass, classMethodRedirects, classFieldRedirects, classTypeRedirects, target.debugSelfRedirects());
         } else {
-            target.getTargetMethods().forEach(targetMethod -> {
+            target.targetMethods().forEach(targetMethod -> {
+                // Copy class redirects
+                Map<Type, Type> typeRedirects = new HashMap<>(classTypeRedirects);
+                Map<ClassField, FieldRedirect> fieldRedirects = new HashMap<>(classFieldRedirects);
+                Map<ClassMethod, MethodRedirect> methodRedirects = new HashMap<>(classMethodRedirects);
+                // Overwrite inherited with redirect-specific ones (if any)
+                buildRedirects(targetMethod.redirectSets(), typeRedirects, fieldRedirects, methodRedirects);
+
                 String newName = targetMethod.dstMethodName();
                 Type srcOwner = targetMethod.srcOwner();
 
@@ -87,18 +85,40 @@ public class Transformer {
                     method = cloneAndApplyRedirects(srcClass, targetClass, targetMethod.method(), newName,
                             methodRedirects,
                             fieldRedirects,
-                            typeRedirects, target.debugSelfRedirects());
+                            typeRedirects,
+                            target.debugSelfRedirects()
+                    );
                 } else {
                     method = applyRedirects(targetClass, targetMethod.method(), newName,
                             methodRedirects,
                             fieldRedirects,
                             typeRedirects,
-                            target.debugSelfRedirects());
+                            target.debugSelfRedirects()
+                    );
                 }
                 if (targetMethod.makeSyntheticAccessor()) {
                     makeStaticSyntheticAccessor(targetClass, method);
                 }
             });
+        }
+    }
+
+    private void buildRedirects(List<RedirectSet> redirectSets, Map<Type, Type> typeRedirects, Map<ClassField, FieldRedirect> fieldRedirects, Map<ClassMethod, MethodRedirect> methodRedirects) {
+        for (RedirectSet redirectSet : redirectSets) {
+            for (TypeRedirect typeRedirect : redirectSet.getTypeRedirects()) {
+                typeRedirects.put(
+                        getObjectType(mappingsProvider.mapClassName(typeRedirect.srcClassName())),
+                        getObjectType(mappingsProvider.mapClassName(typeRedirect.dstClassName()))
+                );
+            }
+
+            for (FieldRedirect fieldRedirect : redirectSet.getFieldRedirects()) {
+                fieldRedirects.put(fieldRedirect.field(), fieldRedirect);
+            }
+
+            for (MethodRedirect methodRedirect : redirectSet.getMethodRedirects()) {
+                methodRedirects.put(methodRedirect.method(), methodRedirect);
+            }
         }
     }
 
@@ -651,85 +671,6 @@ public class Transformer {
                 return key;
             }
             return mapped;
-        }
-    }
-
-    public static final class ClassMethod {
-        public final Type owner;
-        public final Method method;
-        public final Type mappingOwner;
-
-        public ClassMethod(Type owner, Method method) {
-            this.owner = owner;
-            this.method = method;
-            this.mappingOwner = owner;
-        }
-
-        // mapping owner because mappings owner may not be the same as in the call site
-        public ClassMethod(Type owner, Method method, Type mappingOwner) {
-            this.owner = owner;
-            this.method = method;
-            this.mappingOwner = mappingOwner;
-        }
-
-        @Override public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            ClassMethod that = (ClassMethod) o;
-            return owner.equals(that.owner) && method.equals(that.method) && mappingOwner.equals(that.mappingOwner);
-        }
-
-        @Override public int hashCode() {
-            return Objects.hash(owner, method, mappingOwner);
-        }
-
-        @Override public String toString() {
-            return "ClassMethod{" +
-                    "owner=" + owner +
-                    ", method=" + method +
-                    ", mappingOwner=" + mappingOwner +
-                    '}';
-        }
-    }
-
-    public static final class ClassField {
-        public final Type owner;
-        public final String name;
-        public final Type desc;
-
-        public ClassField(String owner, String name, String desc) {
-            this.owner = getObjectType(owner);
-            this.name = name;
-            this.desc = getType(desc);
-        }
-
-        public ClassField(Type owner, String name, Type desc) {
-            this.owner = owner;
-            this.name = name;
-            this.desc = desc;
-        }
-
-        @Override public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            ClassField that = (ClassField) o;
-            return owner.equals(that.owner) && name.equals(that.name) && desc.equals(that.desc);
-        }
-
-        @Override public int hashCode() {
-            return Objects.hash(owner, name, desc);
-        }
-
-        @Override public String toString() {
-            return "ClassField{" +
-                    "owner=" + owner +
-                    ", name='" + name + '\'' +
-                    ", desc=" + desc +
-                    '}';
         }
     }
 }

@@ -1,5 +1,6 @@
-package io.github.opencubicchunks.dasm;
+package io.github.opencubicchunks.dasm.transformer.redirect;
 
+import io.github.opencubicchunks.dasm.transformer.ClassMethod;
 import org.objectweb.asm.Type;
 
 import java.util.Objects;
@@ -8,15 +9,15 @@ import javax.annotation.Nullable;
 
 public final class MethodRedirect {
 
-    private final Transformer.ClassMethod method;
+    private final ClassMethod method;
     private final Type newOwner;
     private final String dstMethodName;
     // used only for other class redirects
     private final boolean isDstInterface;
 
-    public MethodRedirect(Transformer.ClassMethod method, @Nullable String newOwner, String dstMethodName, boolean isDstInterface) {
+    public MethodRedirect(ClassMethod method, @Nullable Type newOwner, String dstMethodName, boolean isDstInterface) {
         this.method = method;
-        this.newOwner = newOwner == null ? null : Type.getObjectType(newOwner.replace('.', '/'));
+        this.newOwner = newOwner;
         this.dstMethodName = dstMethodName;
         this.isDstInterface = isDstInterface;
     }
@@ -25,7 +26,7 @@ public final class MethodRedirect {
         return newOwner;
     }
 
-    public Transformer.ClassMethod method() {
+    public ClassMethod method() {
         return method;
     }
 

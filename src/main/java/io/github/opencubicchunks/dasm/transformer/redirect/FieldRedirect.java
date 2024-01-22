@@ -1,5 +1,6 @@
-package io.github.opencubicchunks.dasm;
+package io.github.opencubicchunks.dasm.transformer.redirect;
 
+import io.github.opencubicchunks.dasm.transformer.ClassField;
 import org.objectweb.asm.Type;
 
 import java.util.Objects;
@@ -8,17 +9,17 @@ import javax.annotation.Nullable;
 
 public final class FieldRedirect {
 
-    private final Transformer.ClassField field;
+    private final ClassField field;
     private final Type newOwner;
     private final String dstFieldName;
 
-    public FieldRedirect(Transformer.ClassField field, @Nullable String newOwner, String dstFieldName) {
+    public FieldRedirect(ClassField field, @Nullable Type newOwner, String dstFieldName) {
         this.field = field;
-        this.newOwner = newOwner == null ? null : Type.getObjectType(newOwner.replace('.', '/'));
+        this.newOwner = newOwner;
         this.dstFieldName = dstFieldName;
     }
 
-    public Transformer.ClassField field() {
+    public ClassField field() {
         return field;
     }
 

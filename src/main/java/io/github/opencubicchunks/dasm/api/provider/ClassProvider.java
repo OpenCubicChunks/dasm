@@ -1,4 +1,4 @@
-package io.github.opencubicchunks.dasm.api;
+package io.github.opencubicchunks.dasm.api.provider;
 
 public interface ClassProvider {
     /**
