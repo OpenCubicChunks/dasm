@@ -29,7 +29,6 @@ public class Transformer {
 
     private final MappingsProvider mappingsProvider;
     private final ClassProvider classProvider;
-    private final Map<String, ClassNode> classProviderCache = new HashMap<>();
     private final boolean globalLogSelfRedirects;
 
     /**
@@ -50,12 +49,7 @@ public class Transformer {
 
         if (target.wholeClass() != null) {
             String srcName = target.wholeClass().getClassName();
-            applyWholeClassRedirects(this.classProviderCache.computeIfAbsent(srcName, n -> {
-                ClassNode dst = new ClassNode(ASM9);
-                final ClassReader classReader = new ClassReader(this.classProvider.classBytes(srcName));
-                classReader.accept(dst, 0);
-                return dst;
-            }), targetClass, classMethodRedirects, classFieldRedirects, classTypeRedirects, target.debugSelfRedirects());
+            applyWholeClassRedirects(classNodeForClass(srcName), targetClass, classMethodRedirects, classFieldRedirects, classTypeRedirects, target.debugSelfRedirects());
         } else {
             target.targetMethods().forEach(targetMethod -> {
                 // Copy class redirects
@@ -72,12 +66,7 @@ public class Transformer {
                 if (srcOwner == targetMethod.method().owner) {
                     srcClass = targetClass;
                 } else {
-                    srcClass = this.classProviderCache.computeIfAbsent(srcOwner.getClassName(), n -> {
-                        ClassNode dst = new ClassNode(ASM9);
-                        final ClassReader classReader = new ClassReader(this.classProvider.classBytes(srcOwner.getClassName()));
-                        classReader.accept(dst, 0);
-                        return dst;
-                    });
+                    srcClass = classNodeForClass(srcOwner.getClassName());
                 }
 
                 MethodNode method;
@@ -408,6 +397,13 @@ public class Transformer {
             }
         }
         return lambdaRedirects;
+    }
+
+    private ClassNode classNodeForClass(String className) {
+        ClassNode dst = new ClassNode(ASM9);
+        final ClassReader classReader = new ClassReader(this.classProvider.classBytes(className));
+        classReader.accept(dst, 0);
+        return dst;
     }
 
     private class RedirectVisitor extends MethodVisitor {
