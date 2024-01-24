@@ -3,7 +3,6 @@ package io.github.opencubicchunks.dasm;
 import io.github.opencubicchunks.dasm.api.provider.ClassProvider;
 import io.github.opencubicchunks.dasm.api.redirect.DasmRedirectSet;
 import io.github.opencubicchunks.dasm.api.transform.DasmRedirect;
-import io.github.opencubicchunks.dasm.api.Ref;
 import io.github.opencubicchunks.dasm.api.transform.TransformFrom;
 import io.github.opencubicchunks.dasm.api.transform.TransformFromClass;
 import io.github.opencubicchunks.dasm.transformer.ClassField;
@@ -20,10 +19,10 @@ import org.objectweb.asm.commons.Method;
 import org.objectweb.asm.tree.*;
 
 import javax.annotation.Nullable;
+import java.lang.reflect.InvocationTargetException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static org.objectweb.asm.Opcodes.ACC_INTERFACE;
 import static org.objectweb.asm.Opcodes.ASM9;
@@ -112,19 +111,11 @@ public class AnnotationParser {
                 continue;
             }
 
-            List<Object> values = ann.values;
-            Type srcClass = Type.getType(getAnnotationDefaultValue(Ref.class, "value", Class.class));
-            TransformFrom.ApplicationStage requestedStage = TransformFrom.ApplicationStage.PRE_APPLY;
-            for (int i = 0, valuesSize = values.size(); i < valuesSize; i += 2) {
-                String name = (String) values.get(i);
-                Object value = values.get(i + 1);
-                if (name.equals("value")) {
-                    srcClass = parseRefAnnotation((AnnotationNode) value);
-                } else if (name.equals("stage")) {
-                    String[] parts = ((String[]) value);
-                    requestedStage = TransformFrom.ApplicationStage.valueOf(parts[1]);
-                }
-            }
+            Map<String, Object> values = getAnnotationValues(ann, TransformFromClass.class);
+
+            @SuppressWarnings("unchecked") Type srcClass = parseRefAnnotation((Map<String, Object>) values.get("value"));
+            TransformFrom.ApplicationStage requestedStage = (TransformFrom.ApplicationStage) values.get("stage");
+
             if (stage != requestedStage) {
                 continue;
             }
@@ -143,43 +134,18 @@ public class AnnotationParser {
                 }
                 iterator.remove();
 
-                // The name value pairs of this annotation. Each name value pair is stored as two consecutive
-                // elements in the list. The name is a String, and the value may be a
-                // Byte, Boolean, Character, Short, Integer, Long, Float, Double, String or org.objectweb.asm.Type,
-                // or a two elements String array (for enumeration values), an AnnotationNode,
-                // or a List of values of one of the preceding types. The list may be null if there is no name value pair.
-                List<Object> values = ann.values;
-                String targetName = getAnnotationDefaultValue(TransformFrom.class, "value", String.class);
-                boolean makeSyntheticAccessor = getAnnotationBoolean(TransformFrom.class, "makeSyntheticAccessor");
-                String desc = null;
-                TransformFrom.ApplicationStage requestedStage = TransformFrom.ApplicationStage.PRE_APPLY;
-                List<RedirectSet> redirectSets = new ArrayList<>();
-                Type srcOwner = Type.getType(getAnnotationDefaultValue(Ref.class, "value", Class.class));
-                for (int i = 0, valuesSize = values.size(); i < valuesSize; i += 2) {
-                    String name = (String) values.get(i);
-                    Object value = values.get(i + 1);
-                    switch (name) {
-                        case "value":
-                            targetName = (String) value;
-                            break;
-                        case "makeSyntheticAccessor":
-                            makeSyntheticAccessor = (Boolean) value;
-                            break;
-                        case "signature":
-                            desc = parseMethodDescriptor((AnnotationNode) value);
-                            break;
-                        case "stage":
-                            String[] parts = ((String[]) value);
-                            requestedStage = TransformFrom.ApplicationStage.valueOf(parts[1]);
-                            break;
-                        case "copyFrom":
-                            srcOwner = parseRefAnnotation((AnnotationNode) value);
-                            break;
-                        case "redirectSets":
-                            redirectSets.addAll(Stream.of((Type[]) value).flatMap(type -> getRedirectSetsForType(type).stream()).collect(Collectors.toList()));
-                            break;
-                    }
-                }
+                Map<String, Object> values = getAnnotationValues(ann, TransformFrom.class);
+
+                String targetName = (String) values.get("value");
+                boolean makeSyntheticAccessor = (boolean) values.get("makeSyntheticAccessor");
+                @SuppressWarnings("unchecked") String desc = parseMethodDescriptor((Map<String, Object>) values.get("signature"));
+                TransformFrom.ApplicationStage requestedStage = (TransformFrom.ApplicationStage) values.get("stage");
+                @SuppressWarnings("unchecked") List<RedirectSet> redirectSets = ((List<Type>) values.get("redirectSets")).stream()
+                        .flatMap(type -> getRedirectSetsForType(type).stream())
+                        .collect(Collectors.toList());
+
+                @SuppressWarnings("unchecked") Type srcOwner = parseRefAnnotation((Map<String, Object>) values.get("copyFrom"));
+
                 if (stage != requestedStage) {
                     continue;
                 }
@@ -190,7 +156,7 @@ public class AnnotationParser {
                     targetName = targetName.substring(0, split);
                 }
                 TargetMethod targetMethod;
-                if (srcOwner.equals(Type.getType(Object.class))) {
+                if (srcOwner == null) {
                     targetMethod = new TargetMethod(
                             new ClassMethod(Type.getObjectType(targetClass.name), new org.objectweb.asm.commons.Method(targetName, desc)),
                             methodPrefix + method.name, // Name is modified here to prevent mixin from overwriting it. We remove this prefix in postApply.
@@ -272,7 +238,7 @@ public class AnnotationParser {
         });
     }
 
-    private Map<String, Object> getAnnotationValues(AnnotationNode annotationNode, Class<?> annotation) {
+    private static Map<String, Object> getAnnotationValues(AnnotationNode annotationNode, Class<?> annotation) {
         Map<String, Object> annotationValues = new HashMap<>();
 
         // Insert specified arguments in the annotation
@@ -280,10 +246,10 @@ public class AnnotationParser {
             String name = (String) annotationNode.values.get(i);
             Object value = annotationNode.values.get(i + 1);
 
-            if (value.getClass().isAnnotation()) {
+            if (value instanceof AnnotationNode) {
                 AnnotationNode annotationValue = (AnnotationNode) value;
                 try {
-                    value = getAnnotationValues(annotationValue, Class.forName(annotationValue.desc));
+                    value = getAnnotationValues(annotationValue, Class.forName(classDescriptorToClassName(annotationValue.desc)));
                 } catch (ClassNotFoundException e) {
                     throw new RuntimeException(e);
                 }
@@ -292,23 +258,50 @@ public class AnnotationParser {
         }
 
         addMissingDefaultValues(annotation, annotationValues);
-
         return annotationValues;
     }
 
     private static void addMissingDefaultValues(Class<?> annotation, Map<String, Object> annotationValues) {
         // Insert default arguments, only if they aren't already present
         for (java.lang.reflect.Method declaredMethod : annotation.getDeclaredMethods()) {
-            if (declaredMethod.isDefault() && !annotationValues.containsKey(declaredMethod.getName())) {
+            Object defaultValue = declaredMethod.getDefaultValue();
+            if (defaultValue != null && !annotationValues.containsKey(declaredMethod.getName())) {
                 if (declaredMethod.getReturnType().isAnnotation()) {
-                    Map<String, Object> value = new HashMap<>();
-                    addMissingDefaultValues(declaredMethod.getReturnType(), value);
-                    annotationValues.put(declaredMethod.getName(), value);
+                    Map<String, Object> values = new HashMap<>();
+                    for (java.lang.reflect.Method method : defaultValue.getClass().getInterfaces()[0].getDeclaredMethods()) {
+                        try {
+                            if (method.getReturnType().isAnnotation()) {
+                                @SuppressWarnings("unchecked") Map<String, Object> v = (Map<String, Object>) annotationValues.computeIfAbsent(method.getName(), n -> new HashMap<>());
+                                addMissingDefaultValues(method.getReturnType(), v);
+                            } else {
+                                Object v = method.invoke(defaultValue);
+                                values.put(method.getName(), matchAsmTypes(v));
+                            }
+                        } catch (IllegalAccessException | InvocationTargetException e) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                    annotationValues.put(declaredMethod.getName(), values);
                 } else {
-                    annotationValues.put(declaredMethod.getName(), declaredMethod.getDefaultValue());
+                    annotationValues.put(declaredMethod.getName(), matchAsmTypes(defaultValue));
                 }
             }
         }
+    }
+
+    private static Object matchAsmTypes(Object defaultValue) {
+        if (defaultValue instanceof Class[]) {
+            return Arrays.stream((Class<?>[]) defaultValue)
+                    .map(Type::getType)
+                    .collect(Collectors.toList());
+        }
+        if (defaultValue.getClass().isArray()) {
+            return Arrays.asList((Object[]) defaultValue);
+        }
+        if (defaultValue instanceof Class<?>) {
+            return Type.getType((Class<?>) defaultValue);
+        }
+        return defaultValue;
     }
 
 
@@ -330,21 +323,12 @@ public class AnnotationParser {
                 continue;
             }
 
-            String newName = null;
-            Type mappingsOwner = null;
-            for (int i = 0, valuesSize = annotation.values.size(); i < valuesSize; i += 2) {
-                String name = (String) annotation.values.get(i);
-                Object value = annotation.values.get(i + 1);
-                switch (name) {
-                    case "value":
-                        newName = (String) value;
-                        break;
-                    case "mappingsOwner":
-                        mappingsOwner = parseRefAnnotation(annotation);
-                        break;
-                }
-            }
-            if (newName == null) {
+            Map<String, Object> values = getAnnotationValues(annotation, io.github.opencubicchunks.dasm.api.redirect.MethodRedirect.class);
+
+            String newName = (String) values.get("value");
+            @SuppressWarnings("unchecked") Type mappingsOwner = parseRefAnnotation((Map<String, Object>) values.get("mappingsOwner"));
+
+            if (newName.isEmpty()) {
                 throw new IllegalStateException(String.format("Invalid method redirect: %s -> %s", methodNode.name, newName));
             }
 
@@ -364,15 +348,11 @@ public class AnnotationParser {
                 continue;
             }
 
-            String newName = null;
-            for (int i = 0, valuesSize = annotation.values.size(); i < valuesSize; i += 2) {
-                String name = (String) annotation.values.get(i);
-                Object value = annotation.values.get(i + 1);
-                if (name.equals("value")) {
-                    newName = ((String) value);
-                }
-            }
-            if (newName == null) {
+            Map<String, Object> values = getAnnotationValues(annotation, FieldRedirect.class);
+
+            String newName = (String) values.get("value");
+
+            if (newName.isEmpty()) {
                 throw new IllegalStateException(String.format("Invalid field redirect: %s -> %s", fieldNode.name, newName));
             }
             return new FieldRedirect(new ClassField(owner, fieldNode.name, Type.getType(fieldNode.desc)), newOwner, newName);
@@ -387,20 +367,11 @@ public class AnnotationParser {
                 continue;
             }
 
-            Type from = null;
-            Type to = null;
-            for (int i = 0, valuesSize = annotation.values.size(); i < valuesSize; i += 2) {
-                String name = (String) annotation.values.get(i);
-                Object value = annotation.values.get(i + 1);
-                switch (name) {
-                    case "from":
-                        from = parseRefAnnotation((AnnotationNode) value);
-                        break;
-                    case "to":
-                        to = parseRefAnnotation((AnnotationNode) value);
-                        break;
-                }
-            }
+            Map<String, Object> values = getAnnotationValues(annotation, TypeRedirect.class);
+
+            @SuppressWarnings("unchecked") Type from = parseRefAnnotation((Map<String, Object>) values.get("from"));
+            @SuppressWarnings("unchecked") Type to = parseRefAnnotation((Map<String, Object>) values.get("to"));
+
             if (from == null || to == null) {
                 throw new IllegalStateException(String.format("Invalid type redirect: %s -> %s", from, to));
             }
@@ -410,42 +381,37 @@ public class AnnotationParser {
         throw new IllegalStateException(String.format("No type redirect on inner class %s", innerClass.name));
     }
 
-    private static Type parseRefAnnotation(AnnotationNode refNode) {
-        assert refNode.values.size() == 2 : "Clazz annotation has multiple targeting fields";
-
-        if ((refNode.values.get(0)).equals("value")) {
-            return (Type) refNode.values.get(1);
-        } else if ((refNode.values.get(0)).equals("string")) {
-            return Type.getObjectType((String) refNode.values.get(1));
+    @Nullable
+    private static Type parseRefAnnotation(Map<String, Object> values) {
+        Type type = null;
+        if (values.containsKey("value")) {
+            type = (Type) values.get("value");
         }
-        return Type.getType(getAnnotationDefaultValue(Ref.class, "value", Class.class));
+        if (values.containsKey("string")) {
+            String string = (String) values.get("string");
+            if (!string.isEmpty()) {
+                type = Type.getObjectType(string);
+            }
+        }
+        if (type == null) {
+            throw new IllegalArgumentException("Ref annotation was given no arguments!");
+        }
+        if (type.getClassName().equals(Object.class.getName())) {
+            return null;
+        }
+        return type;
     }
 
-    private static String parseMethodDescriptor(AnnotationNode ann) {
+    private static String parseMethodDescriptor(Map<String, Object> ann) {
         if (ann == null) {
             return null;
         }
-        List<Object> values = ann.values;
 
-        Type ret = null;
-        List<Type> args = null;
-        boolean useFromString = false;
-        for (int i = 0, valuesSize = values.size(); i < valuesSize; i += 2) {
-            String name = (String) values.get(i);
-            Object value = values.get(i + 1);
-            switch (name) {
-                case "ret":
-                    ret = (Type) value;
-                    break;
-                case "args":
-                    args = (List<Type>) value;
-                    break;
-                case "useFromString":
-                    useFromString = (Boolean) value;
-                    break;
-            }
-        }
-        if (useFromString) {
+        Type ret = (Type) ann.get("ret");
+        @SuppressWarnings("unchecked") List<Type> args = (List<Type>) ann.get("args");
+        boolean fromString = (boolean) ann.get("fromString");
+
+        if (fromString) {
             return null;
         }
         return Type.getMethodDescriptor(ret, args.toArray(new Type[0]));
@@ -458,7 +424,11 @@ public class AnnotationParser {
         return dst;
     }
 
-    private String classToDescriptor(Class<?> clazz) {
+    private static String classToDescriptor(Class<?> clazz) {
         return "L" + clazz.getName().replace('.', '/') + ";";
+    }
+
+    private static String classDescriptorToClassName(String descriptor) {
+        return Type.getType(descriptor).getClassName();
     }
 }
