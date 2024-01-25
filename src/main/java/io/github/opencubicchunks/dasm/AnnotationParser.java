@@ -13,6 +13,7 @@ import io.github.opencubicchunks.dasm.transformer.redirect.RedirectSet;
 import io.github.opencubicchunks.dasm.transformer.redirect.TypeRedirect;
 import io.github.opencubicchunks.dasm.transformer.target.TargetClass;
 import io.github.opencubicchunks.dasm.transformer.target.TargetMethod;
+import io.github.opencubicchunks.dasm.util.Pair;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.commons.Method;
@@ -78,30 +79,6 @@ public class AnnotationParser {
         }
     }
 
-    private static <T> T getAnnotationDefaultValue(Class<?> clazz, String field, Class<T> defaultValueType) {
-        try {
-            Object defaultValue = clazz.getDeclaredMethod(field).getDefaultValue();
-            if (defaultValue != null && !defaultValueType.isInstance(defaultValue)) { // Same check as in Class.cast
-                throw new ClassCastException(String.format("Cannot cast object of type %s to %s. In class %s#%s", defaultValue.getClass(), defaultValueType, clazz, field));
-            }
-            return (T) defaultValue;
-        } catch (NoSuchMethodException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    private static boolean getAnnotationBoolean(Class<?> clazz, String field) {
-        try {
-            Object defaultValue = clazz.getDeclaredMethod(field).getDefaultValue();
-            if (defaultValue != null && !(defaultValue instanceof Boolean)) { // Same check as in Class.cast
-                throw new ClassCastException(String.format("Cannot cast object of type %s to Boolean. In class %s#%s", defaultValue.getClass(), clazz, field));
-            }
-            return defaultValue != null && (boolean) defaultValue;
-        } catch (NoSuchMethodException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     public void buildClassTarget(ClassNode targetClass, TargetClass classTarget, TransformFrom.ApplicationStage stage, String methodPrefix) {
         if (targetClass.invisibleAnnotations == null) {
             return;
@@ -136,9 +113,8 @@ public class AnnotationParser {
 
                 Map<String, Object> values = getAnnotationValues(ann, TransformFrom.class);
 
-                String targetName = (String) values.get("value");
+                Pair<String, String> methodSig = parseMethodSigAnnotation((Map<String, Object>) values.get("value"));
                 boolean makeSyntheticAccessor = (boolean) values.get("makeSyntheticAccessor");
-                @SuppressWarnings("unchecked") String desc = parseMethodDescriptor((Map<String, Object>) values.get("signature"));
                 TransformFrom.ApplicationStage requestedStage = (TransformFrom.ApplicationStage) values.get("stage");
                 @SuppressWarnings("unchecked") List<RedirectSet> redirectSets = ((List<Type>) values.get("redirectSets")).stream()
                         .flatMap(type -> getRedirectSetsForType(type).stream())
@@ -150,15 +126,10 @@ public class AnnotationParser {
                     continue;
                 }
 
-                if (desc == null) {
-                    int split = targetName.indexOf('(');
-                    desc = targetName.substring(split);
-                    targetName = targetName.substring(0, split);
-                }
                 TargetMethod targetMethod;
                 if (srcOwner == null) {
                     targetMethod = new TargetMethod(
-                            new ClassMethod(Type.getObjectType(targetClass.name), new org.objectweb.asm.commons.Method(targetName, desc)),
+                            new ClassMethod(Type.getObjectType(targetClass.name), new org.objectweb.asm.commons.Method(methodSig.first, methodSig.second)),
                             methodPrefix + method.name, // Name is modified here to prevent mixin from overwriting it. We remove this prefix in postApply.
                             true,
                             makeSyntheticAccessor,
@@ -167,7 +138,7 @@ public class AnnotationParser {
                 } else {
                     targetMethod = new TargetMethod(
                             srcOwner,
-                            new ClassMethod(Type.getObjectType(targetClass.name), new org.objectweb.asm.commons.Method(targetName, desc)),
+                            new ClassMethod(Type.getObjectType(targetClass.name), new org.objectweb.asm.commons.Method(methodSig.first, methodSig.second)),
                             methodPrefix + method.name, // Name is modified here to prevent mixin from overwriting it. We remove this prefix in postApply.
                             true,
                             makeSyntheticAccessor,
@@ -402,19 +373,25 @@ public class AnnotationParser {
         return type;
     }
 
-    private static String parseMethodDescriptor(Map<String, Object> ann) {
+    private static Pair<String, String> parseMethodSigAnnotation(Map<String, Object> ann) {
         if (ann == null) {
             return null;
         }
 
+        String value = ((String) ann.get("value"));
+        if (!value.isEmpty()) {
+            int parametersStart = value.indexOf('(');
+            if (parametersStart == -1) { // did not find
+                throw new IllegalArgumentException(String.format("MethodSig annotation had invalid value %s", value));
+            }
+            return new Pair<>(value.substring(0, parametersStart), value.substring(parametersStart));
+        }
+
         Type ret = (Type) ann.get("ret");
         @SuppressWarnings("unchecked") List<Type> args = (List<Type>) ann.get("args");
-        boolean fromString = (boolean) ann.get("fromString");
+        String name = (String) ann.get("value");
 
-        if (fromString) {
-            return null;
-        }
-        return Type.getMethodDescriptor(ret, args.toArray(new Type[0]));
+        return new Pair<>(name, Type.getMethodDescriptor(ret, args.toArray(new Type[0])));
     }
 
     private ClassNode classNodeForType(Type type) {
