@@ -1,6 +1,8 @@
 package io.github.opencubicchunks.dasm;
 
 import io.github.opencubicchunks.dasm.api.provider.ClassProvider;
+import io.github.opencubicchunks.dasm.api.redirect.AddFieldToSets;
+import io.github.opencubicchunks.dasm.api.redirect.AddMethodToSets;
 import io.github.opencubicchunks.dasm.api.redirect.DasmRedirectSet;
 import io.github.opencubicchunks.dasm.api.transform.DasmRedirect;
 import io.github.opencubicchunks.dasm.api.transform.TransformFrom;
@@ -99,6 +101,66 @@ public class AnnotationParser {
             classTarget.targetWholeClass(srcClass);
         }
 
+        targetClass.fields.forEach(fieldNode -> {
+            AnnotationNode annotation = getAnnotationIfPresent(fieldNode.invisibleAnnotations, AddFieldToSets.class);
+            if (annotation == null) {
+                return;
+            }
+            Map<String, Object> values = getAnnotationValues(annotation, AddFieldToSets.class);
+
+            @SuppressWarnings("unchecked") Type owner = (Type) values.get("owner");
+
+            @SuppressWarnings("unchecked") Map<String, Object> field = (Map<String, Object>) values.get("field");
+            Type fieldType = (Type) field.get("type");
+            String fieldName = (String) field.get("name");
+
+            @SuppressWarnings("unchecked") List<Type> sets = (List<Type>) values.get("sets");
+
+            sets.forEach(set -> {
+                RedirectSet directRedirectSetForType = getDirectRedirectSetForType(set);
+                if (directRedirectSetForType == null) {
+                    throw new IllegalArgumentException(String.format("Couldn't find redirect set for class %s", set.getClassName()));
+                }
+                directRedirectSetForType.addRedirect(new FieldRedirect(
+                        new ClassField(owner, fieldName, Type.getType(fieldType.getDescriptor())),
+                        Type.getType(classNameToDescriptor(targetClass.name)), // TODO: is this necessary?
+                        fieldNode.name
+                ));
+            });
+        });
+
+        targetClass.methods.forEach(methodNode -> {
+            AnnotationNode annotation = getAnnotationIfPresent(methodNode.invisibleAnnotations, AddMethodToSets.class);
+            if (annotation == null) {
+                return;
+            }
+            Map<String, Object> values = getAnnotationValues(annotation, AddMethodToSets.class);
+
+            @SuppressWarnings("unchecked") Type owner = (Type) values.get("owner");
+
+            @SuppressWarnings("unchecked") Pair<String, String> methodParts = parseMethodSigAnnotation((Map<String, Object>) values.get("method"));
+
+            @SuppressWarnings("unchecked") List<Type> sets = (List<Type>) values.get("sets");
+
+            sets.forEach(set -> {
+                RedirectSet directRedirectSetForType = getDirectRedirectSetForType(set);
+                if (directRedirectSetForType == null) {
+                    throw new IllegalArgumentException(String.format("Couldn't find redirect set for class %s", set.getClassName()));
+                }
+                directRedirectSetForType.addRedirect(new MethodRedirect(
+                        new ClassMethod(
+                                owner,
+                                new Method(methodParts.first, methodParts.second)
+                        ),
+                        Type.getType(classNameToDescriptor(targetClass.name)), // TODO: is this necessary?
+                        methodNode.name,
+                        (targetClass.access & ACC_INTERFACE) != 0
+                ));
+            });
+        });
+
+
+
         for (Iterator<MethodNode> iterator = targetClass.methods.iterator(); iterator.hasNext(); ) {
             MethodNode method = iterator.next();
             if (method.invisibleAnnotations == null) {
@@ -116,35 +178,39 @@ public class AnnotationParser {
                 Pair<String, String> methodSig = parseMethodSigAnnotation((Map<String, Object>) values.get("value"));
                 boolean makeSyntheticAccessor = (boolean) values.get("makeSyntheticAccessor");
                 TransformFrom.ApplicationStage requestedStage = (TransformFrom.ApplicationStage) values.get("stage");
-                @SuppressWarnings("unchecked") List<RedirectSet> redirectSets = ((List<Type>) values.get("redirectSets")).stream()
-                        .flatMap(type -> getRedirectSetsForType(type).stream())
+                @SuppressWarnings("unchecked") Type srcOwner = parseRefAnnotation((Map<String, Object>) values.get("copyFrom"));
+
+                @SuppressWarnings("unchecked") List<RedirectSet> usedRedirectSets = ((List<Type>) values.get("useRedirectSets")).stream()
+                        .flatMap(setType -> getRedirectSetsForType(setType).stream())
                         .collect(Collectors.toList());
 
-                @SuppressWarnings("unchecked") Type srcOwner = parseRefAnnotation((Map<String, Object>) values.get("copyFrom"));
+                ClassMethod classMethod = new ClassMethod(
+                        Type.getType(classNameToDescriptor(classTarget.getClassName())),
+                        new Method(methodSig.first, methodSig.second)
+                );
+                Type methodOwner = srcOwner != null ? srcOwner : classMethod.owner;
+                boolean isDstInterface = (targetClass.access & ACC_INTERFACE) != 0;
+
+                ((List<Type>) values.get("addToRedirectSets")).stream()
+                        .flatMap(setType -> getRedirectSetsForType(setType).stream())
+                        .forEach(redirectSet -> {
+                            redirectSet.addRedirect(new MethodRedirect(classMethod, methodOwner, method.name, isDstInterface));
+                        });
+
 
                 if (stage != requestedStage) {
                     continue;
                 }
 
-                TargetMethod targetMethod;
-                if (srcOwner == null) {
-                    targetMethod = new TargetMethod(
-                            new ClassMethod(Type.getObjectType(targetClass.name), new org.objectweb.asm.commons.Method(methodSig.first, methodSig.second)),
-                            methodPrefix + method.name, // Name is modified here to prevent mixin from overwriting it. We remove this prefix in postApply.
-                            true,
-                            makeSyntheticAccessor,
-                            redirectSets
-                    );
-                } else {
-                    targetMethod = new TargetMethod(
-                            srcOwner,
-                            new ClassMethod(Type.getObjectType(targetClass.name), new org.objectweb.asm.commons.Method(methodSig.first, methodSig.second)),
-                            methodPrefix + method.name, // Name is modified here to prevent mixin from overwriting it. We remove this prefix in postApply.
-                            true,
-                            makeSyntheticAccessor,
-                            redirectSets
-                    );
-                }
+                TargetMethod targetMethod = new TargetMethod(
+                        methodOwner,
+                        classMethod,
+                        methodPrefix + method.name, // Name is modified here to prevent mixin from overwriting it. We remove this prefix in postApply.
+                        true,
+                        makeSyntheticAccessor,
+                        usedRedirectSets
+                );
+
                 if (classTarget.targetMethods().stream().anyMatch(t -> t.method().method.equals(targetMethod.method().method))) {
                     throw new RuntimeException(String.format("Trying to add duplicate TargetMethod to %s:\n\t\t\t\t%s | %s", classTarget.getClassName(), targetMethod.method().owner,
                             targetMethod.method().method));
@@ -154,18 +220,29 @@ public class AnnotationParser {
         }
     }
 
-    private List<RedirectSet> getRedirectSetsForType(Type type) {
-        return this.redirectSetsByType.computeIfAbsent(type, t -> {
+    @Nullable
+    private RedirectSet getDirectRedirectSetForType(Type setType) {
+        List<RedirectSet> redirectSets = this.redirectSetsByType.get(setType);
+
+        if (redirectSets == null || redirectSets.isEmpty()) {
+            return null;
+        }
+
+        return redirectSets.get(redirectSets.size() - 1);
+    }
+
+    private List<RedirectSet> getRedirectSetsForType(Type setType) {
+        return this.redirectSetsByType.computeIfAbsent(setType, t -> {
             List<RedirectSet> redirectSets = new ArrayList<>();
 
-            ClassNode classNode = classNodeForType(type);
+            ClassNode classNode = classNodeForType(setType);
             if ((classNode.access & ACC_INTERFACE) == 0) {
                 throw new IllegalStateException("Non-interface type is a redirect set");
             }
 
-            AnnotationNode annotationNode = getAnnotationIfPresent(classNode, DasmRedirectSet.class);
+            AnnotationNode annotationNode = getAnnotationIfPresent(classNode.invisibleAnnotations, DasmRedirectSet.class);
             if (annotationNode == null) {
-                throw new IllegalStateException(String.format("Class %s is used as a redirect set but not marked with %s", type.getClassName(), DasmRedirectSet.class.getSimpleName()));
+                throw new IllegalStateException(String.format("Class %s is used as a redirect set but not marked with %s", setType.getClassName(), DasmRedirectSet.class.getSimpleName()));
             }
 
             // First add inherited redirect sets
@@ -174,20 +251,21 @@ public class AnnotationParser {
             }
 
             // Then add this set
-            RedirectSet thisRedirectSet = new RedirectSet(type.getClassName());
+            RedirectSet thisRedirectSet = new RedirectSet(setType.getClassName());
             redirectSets.add(thisRedirectSet);
 
             // Discover type/field/method redirects in innerclass
             for (InnerClassNode innerClass : classNode.innerClasses) {
                 ClassNode innerClassNode = classNodeForType(Type.getObjectType(innerClass.name));
-                thisRedirectSet.addRedirect(parseTypeRedirect(innerClassNode));
+                TypeRedirect typeRedirect = parseTypeRedirect(innerClassNode);
+                thisRedirectSet.addRedirect(typeRedirect);
 
                 for (FieldNode field : innerClassNode.fields) {
                     thisRedirectSet.addRedirect(parseFieldRedirect(
                             field,
-                            Type.getType("L" + innerClassNode.name + ";"),
-                            null)
-                    );
+                            Type.getType(classNameToDescriptor(typeRedirect.srcClassName())),
+                            Type.getType(classNameToDescriptor(typeRedirect.dstClassName())) // TODO: is this necessary?
+                    ));
                 }
 
                 for (MethodNode method : innerClassNode.methods) {
@@ -198,8 +276,8 @@ public class AnnotationParser {
 
                     thisRedirectSet.addRedirect(parseMethodRedirect(
                             method,
-                            Type.getType("L" + innerClassNode.name + ";"),
-                            null,
+                            Type.getType(classNameToDescriptor(typeRedirect.srcClassName())),
+                            Type.getType(classNameToDescriptor(typeRedirect.dstClassName())), // TODO: is this necessary?
                             (innerClassNode.access & ACC_INTERFACE) == 0)
                     );
                 }
@@ -276,11 +354,11 @@ public class AnnotationParser {
     }
 
 
-    @Nullable private AnnotationNode getAnnotationIfPresent(ClassNode classNode, Class<?> annotation) {
-        if (classNode.invisibleAnnotations == null) {
+    @Nullable private AnnotationNode getAnnotationIfPresent(List<AnnotationNode> annotations, Class<?> annotation) {
+        if (annotations == null) {
             return null;
         }
-        for (AnnotationNode annotationNode : classNode.invisibleAnnotations) {
+        for (AnnotationNode annotationNode : annotations) {
             if (annotationNode.desc.equals(classToDescriptor(annotation))) {
                 return annotationNode;
             }
@@ -402,7 +480,11 @@ public class AnnotationParser {
     }
 
     private static String classToDescriptor(Class<?> clazz) {
-        return "L" + clazz.getName().replace('.', '/') + ";";
+        return classNameToDescriptor(clazz.getName());
+    }
+
+    private static String classNameToDescriptor(String className) {
+        return "L" + className.replace('.', '/') + ";";
     }
 
     private static String classDescriptorToClassName(String descriptor) {

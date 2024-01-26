@@ -19,9 +19,15 @@ public @interface TransformFrom {
 
     Ref copyFrom() default @Ref();
 
-    Class<?>[] redirectSets() default { };
+    /**
+     * <h2>Do <u><b>NOT</b></u> confuse with {@link TransformFrom#addToRedirectSets}</h2>
+     */
+    Class<?>[] useRedirectSets() default { };
 
-    Class<?>[] addToSets() default { };
+    /**
+     * <h2>Do <u><b>NOT</b></u> confuse with {@link TransformFrom#useRedirectSets}</h2>
+     */
+    Class<?>[] addToRedirectSets() default { };
 
     enum ApplicationStage {
         PRE_APPLY,

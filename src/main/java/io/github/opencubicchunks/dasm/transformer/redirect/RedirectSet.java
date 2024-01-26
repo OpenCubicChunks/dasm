@@ -2,16 +2,13 @@ package io.github.opencubicchunks.dasm.transformer.redirect;
 
 import org.jetbrains.annotations.NotNull;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 
 public class RedirectSet {
     private final String name;
-    private final List<TypeRedirect> typeRedirects = new ArrayList<>();
-    private final List<FieldRedirect> fieldRedirects = new ArrayList<>();
-    private final List<MethodRedirect> methodRedirects = new ArrayList<>();
+    private final Set<TypeRedirect> typeRedirects = new LinkedHashSet<>();
+    private final Set<FieldRedirect> fieldRedirects = new LinkedHashSet<>();
+    private final Set<MethodRedirect> methodRedirects = new LinkedHashSet<>();
 
     public RedirectSet(String name) {
         this.name = name;
@@ -34,16 +31,16 @@ public class RedirectSet {
     }
 
     @NotNull
-    public List<TypeRedirect> getTypeRedirects() {
-        return Collections.unmodifiableList(this.typeRedirects);
+    public Set<TypeRedirect> getTypeRedirects() {
+        return Collections.unmodifiableSet(this.typeRedirects);
     }
 
-    @NotNull public List<FieldRedirect> getFieldRedirects() {
-        return Collections.unmodifiableList(this.fieldRedirects);
+    @NotNull public Set<FieldRedirect> getFieldRedirects() {
+        return Collections.unmodifiableSet(this.fieldRedirects);
     }
 
-    @NotNull public List<MethodRedirect> getMethodRedirects() {
-        return Collections.unmodifiableList(methodRedirects);
+    @NotNull public Set<MethodRedirect> getMethodRedirects() {
+        return Collections.unmodifiableSet(methodRedirects);
     }
 
     public void mergeIfNotPresent(RedirectSet other) {
