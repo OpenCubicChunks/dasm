@@ -4,6 +4,7 @@ import io.github.opencubicchunks.dasm.api.provider.ClassProvider;
 import io.github.opencubicchunks.dasm.api.redirect.AddFieldToSets;
 import io.github.opencubicchunks.dasm.api.redirect.AddMethodToSets;
 import io.github.opencubicchunks.dasm.api.redirect.DasmRedirectSet;
+import io.github.opencubicchunks.dasm.api.redirect.PartialRedirect;
 import io.github.opencubicchunks.dasm.api.transform.DasmRedirect;
 import io.github.opencubicchunks.dasm.api.transform.TransformFrom;
 import io.github.opencubicchunks.dasm.api.transform.TransformFromClass;
@@ -257,14 +258,29 @@ public class AnnotationParser {
             // Discover type/field/method redirects in innerclass
             for (InnerClassNode innerClass : classNode.innerClasses) {
                 ClassNode innerClassNode = classNodeForType(Type.getObjectType(innerClass.name));
-                TypeRedirect typeRedirect = parseTypeRedirect(innerClassNode);
-                thisRedirectSet.addRedirect(typeRedirect);
+
+                String srcClassName;
+                String dstClassName;
+
+                if (isAnnotationIfPresent(innerClassNode.invisibleAnnotations, io.github.opencubicchunks.dasm.api.redirect.TypeRedirect.class)) {
+                    TypeRedirect typeRedirect = parseTypeRedirect(innerClassNode);
+                    thisRedirectSet.addRedirect(typeRedirect);
+
+                    srcClassName = typeRedirect.srcClassName();
+                    dstClassName = typeRedirect.dstClassName();
+                } else if (isAnnotationIfPresent(innerClassNode.invisibleAnnotations, PartialRedirect.class)) {
+                    Pair<String, String> partialRedirect = parsePartialRedirect(innerClassNode);
+                    srcClassName = partialRedirect.first;
+                    dstClassName = partialRedirect.second;
+                } else {
+                    throw new IllegalStateException(String.format("Inner class %s must be either a TypeRedirect or a PartialRedirect", innerClass.name));
+                }
 
                 for (FieldNode field : innerClassNode.fields) {
                     thisRedirectSet.addRedirect(parseFieldRedirect(
                             field,
-                            Type.getType(classNameToDescriptor(typeRedirect.srcClassName())),
-                            Type.getType(classNameToDescriptor(typeRedirect.dstClassName())) // TODO: is this necessary?
+                            Type.getType(classNameToDescriptor(srcClassName)),
+                            Type.getType(classNameToDescriptor(dstClassName)) // TODO: is this necessary?
                     ));
                 }
 
@@ -276,8 +292,8 @@ public class AnnotationParser {
 
                     thisRedirectSet.addRedirect(parseMethodRedirect(
                             method,
-                            Type.getType(classNameToDescriptor(typeRedirect.srcClassName())),
-                            Type.getType(classNameToDescriptor(typeRedirect.dstClassName())), // TODO: is this necessary?
+                            Type.getType(classNameToDescriptor(srcClassName)),
+                            Type.getType(classNameToDescriptor(dstClassName)), // TODO: is this necessary?
                             (innerClassNode.access & ACC_INTERFACE) == 0)
                     );
                 }
@@ -366,6 +382,18 @@ public class AnnotationParser {
         return null;
     }
 
+    private boolean isAnnotationIfPresent(List<AnnotationNode> annotations, Class<?> annotation) {
+        if (annotations == null) {
+            return false;
+        }
+        for (AnnotationNode annotationNode : annotations) {
+            if (annotationNode.desc.equals(classToDescriptor(annotation))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private MethodRedirect parseMethodRedirect(MethodNode methodNode, Type owner, @Nullable Type newOwner, boolean isDstInterface) {
         for (AnnotationNode annotation : methodNode.invisibleAnnotations) {
             if (!annotation.desc.equals(classToDescriptor(io.github.opencubicchunks.dasm.api.redirect.MethodRedirect.class))) {
@@ -425,6 +453,26 @@ public class AnnotationParser {
                 throw new IllegalStateException(String.format("Invalid type redirect: %s -> %s", from, to));
             }
             return new TypeRedirect(from.getClassName(), to.getClassName());
+        }
+
+        throw new IllegalStateException(String.format("No type redirect on inner class %s", innerClass.name));
+    }
+
+    private Pair<String, String> parsePartialRedirect(ClassNode innerClass) {
+        for (AnnotationNode annotation : innerClass.invisibleAnnotations) {
+            if (!annotation.desc.equals(classToDescriptor(PartialRedirect.class))) {
+                continue;
+            }
+
+            Map<String, Object> values = getAnnotationValues(annotation, PartialRedirect.class);
+
+            @SuppressWarnings("unchecked") Type from = parseRefAnnotation((Map<String, Object>) values.get("from"));
+            @SuppressWarnings("unchecked") Type to = parseRefAnnotation((Map<String, Object>) values.get("to"));
+
+            if (from == null || to == null) {
+                throw new IllegalStateException(String.format("Invalid type redirect: %s -> %s", from, to));
+            }
+            return new Pair<>(from.getClassName(), to.getClassName());
         }
 
         throw new IllegalStateException(String.format("No type redirect on inner class %s", innerClass.name));
