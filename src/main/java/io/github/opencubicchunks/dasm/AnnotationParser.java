@@ -124,7 +124,7 @@ public class AnnotationParser {
                 }
                 directRedirectSetForType.addRedirect(new FieldRedirect(
                         new ClassField(owner, fieldName, Type.getType(fieldType.getDescriptor())),
-                        Type.getType(classNameToDescriptor(targetClass.name)), // TODO: is this necessary?
+                        owner.getClassName().equals(targetClass.name) ? null : Type.getType(classNameToDescriptor(targetClass.name)),
                         fieldNode.name
                 ));
             });
@@ -153,7 +153,7 @@ public class AnnotationParser {
                                 owner,
                                 new Method(methodParts.first, methodParts.second)
                         ),
-                        Type.getType(classNameToDescriptor(targetClass.name)), // TODO: is this necessary?
+                        owner.getClassName().equals(targetClass.name) ? null : Type.getType(classNameToDescriptor(targetClass.name)),
                         methodNode.name,
                         (targetClass.access & ACC_INTERFACE) != 0
                 ));
