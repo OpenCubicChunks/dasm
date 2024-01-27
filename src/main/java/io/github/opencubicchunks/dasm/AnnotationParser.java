@@ -276,11 +276,14 @@ public class AnnotationParser {
                     throw new IllegalStateException(String.format("Inner class %s must be either a TypeRedirect or a PartialRedirect", innerClass.name));
                 }
 
+                Type srcOwner = Type.getType(classNameToDescriptor(srcClassName));
+                Type dstOwner = Type.getType(classNameToDescriptor(dstClassName));
+
                 for (FieldNode field : innerClassNode.fields) {
                     thisRedirectSet.addRedirect(parseFieldRedirect(
                             field,
                             Type.getType(classNameToDescriptor(srcClassName)),
-                            Type.getType(classNameToDescriptor(dstClassName)) // TODO: is this necessary?
+                            srcOwner == dstOwner ? null : dstOwner
                     ));
                 }
 
@@ -292,8 +295,8 @@ public class AnnotationParser {
 
                     thisRedirectSet.addRedirect(parseMethodRedirect(
                             method,
-                            Type.getType(classNameToDescriptor(srcClassName)),
-                            Type.getType(classNameToDescriptor(dstClassName)), // TODO: is this necessary?
+                            srcOwner,
+                            srcOwner == dstOwner ? null : dstOwner,
                             (innerClassNode.access & ACC_INTERFACE) == 0)
                     );
                 }
