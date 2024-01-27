@@ -189,7 +189,7 @@ public class AnnotationParser {
                         Type.getType(classNameToDescriptor(classTarget.getClassName())),
                         new Method(methodSig.first, methodSig.second)
                 );
-                Type methodOwner = srcOwner != null ? srcOwner : classMethod.owner;
+                Type methodOwner = srcOwner != null ? srcOwner : classMethod.owner.getClassName().equals(targetClass.name) ? null : classMethod.owner;
                 boolean isDstInterface = (targetClass.access & ACC_INTERFACE) != 0;
 
                 ((List<Type>) values.get("addToRedirectSets")).stream()
