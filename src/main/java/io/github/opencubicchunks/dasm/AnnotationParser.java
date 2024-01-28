@@ -210,10 +210,15 @@ public class AnnotationParser {
                         .flatMap(setType -> getRedirectSetsForType(setType).stream())
                         .forEach(redirectSet -> redirectSet.addRedirect(new MethodRedirect(classMethod, newOwner, method.name, isDstInterface)));
 
+                // Name is modified here to prevent mixin from overwriting it. We remove this prefix in postApply.
+                String prefixedMethodName = methodPrefix + method.name
+                        .replace("<init>", "__init__")
+                        .replace("<clinit>", "__clinit__");
+
                 TargetMethod targetMethod = new TargetMethod(
                         methodOwner,
                         classMethod,
-                        methodPrefix + method.name, // Name is modified here to prevent mixin from overwriting it. We remove this prefix in postApply.
+                        prefixedMethodName,
                         true,
                         makeSyntheticAccessor,
                         usedRedirectSets
