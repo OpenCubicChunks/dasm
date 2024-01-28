@@ -82,6 +82,13 @@ public class AnnotationParser {
         }
     }
 
+    @Nullable private Type getNewOwner(Type currentClass, Type newOwner) {
+        if (currentClass.equals(newOwner)) {
+            return null;
+        }
+        return newOwner;
+    }
+
     public void buildClassTarget(ClassNode targetClass, TargetClass classTarget, TransformFrom.ApplicationStage stage, String methodPrefix) {
         if (targetClass.invisibleAnnotations == null) {
             return;
@@ -109,7 +116,7 @@ public class AnnotationParser {
             }
             Map<String, Object> values = getAnnotationValues(annotation, AddFieldToSets.class);
 
-            @SuppressWarnings("unchecked") Type owner = (Type) values.get("owner");
+            Type owner = (Type) values.get("owner");
 
             @SuppressWarnings("unchecked") Map<String, Object> field = (Map<String, Object>) values.get("field");
             Type fieldType = (Type) field.get("type");
@@ -124,7 +131,7 @@ public class AnnotationParser {
                 }
                 directRedirectSetForType.addRedirect(new FieldRedirect(
                         new ClassField(owner, fieldName, Type.getType(fieldType.getDescriptor())),
-                        Type.getType(classNameToDescriptor(targetClass.name)), // TODO: is this necessary?
+                        getNewOwner(Type.getType(classNameToDescriptor(classTarget.getClassName())), owner),
                         fieldNode.name
                 ));
             });
@@ -153,7 +160,7 @@ public class AnnotationParser {
                                 owner,
                                 new Method(methodParts.first, methodParts.second)
                         ),
-                        Type.getType(classNameToDescriptor(targetClass.name)), // TODO: is this necessary?
+                        getNewOwner(Type.getType(classNameToDescriptor(classTarget.getClassName())), owner),
                         methodNode.name,
                         (targetClass.access & ACC_INTERFACE) != 0
                 ));
@@ -176,9 +183,14 @@ public class AnnotationParser {
 
                 Map<String, Object> values = getAnnotationValues(ann, TransformFrom.class);
 
+                TransformFrom.ApplicationStage requestedStage = (TransformFrom.ApplicationStage) values.get("stage");
+                if (stage != requestedStage) {
+                    continue;
+                }
+
                 Pair<String, String> methodSig = parseMethodSigAnnotation((Map<String, Object>) values.get("value"));
                 boolean makeSyntheticAccessor = (boolean) values.get("makeSyntheticAccessor");
-                TransformFrom.ApplicationStage requestedStage = (TransformFrom.ApplicationStage) values.get("stage");
+
                 @SuppressWarnings("unchecked") Type srcOwner = parseRefAnnotation((Map<String, Object>) values.get("copyFrom"));
 
                 @SuppressWarnings("unchecked") List<RedirectSet> usedRedirectSets = ((List<Type>) values.get("useRedirectSets")).stream()
@@ -192,16 +204,11 @@ public class AnnotationParser {
                 Type methodOwner = srcOwner != null ? srcOwner : classMethod.owner;
                 boolean isDstInterface = (targetClass.access & ACC_INTERFACE) != 0;
 
+                Type newOwner = getNewOwner(Type.getType(classNameToDescriptor(classTarget.getClassName())), methodOwner);
+                //noinspection unchecked
                 ((List<Type>) values.get("addToRedirectSets")).stream()
                         .flatMap(setType -> getRedirectSetsForType(setType).stream())
-                        .forEach(redirectSet -> {
-                            redirectSet.addRedirect(new MethodRedirect(classMethod, methodOwner, method.name, isDstInterface));
-                        });
-
-
-                if (stage != requestedStage) {
-                    continue;
-                }
+                        .forEach(redirectSet -> redirectSet.addRedirect(new MethodRedirect(classMethod, newOwner, method.name, isDstInterface)));
 
                 TargetMethod targetMethod = new TargetMethod(
                         methodOwner,
@@ -276,11 +283,13 @@ public class AnnotationParser {
                     throw new IllegalStateException(String.format("Inner class %s must be either a TypeRedirect or a PartialRedirect", innerClass.name));
                 }
 
+                Type srcType = Type.getType(classNameToDescriptor(srcClassName));
+                Type newOwner = getNewOwner(srcType, Type.getType(classNameToDescriptor(dstClassName)));
                 for (FieldNode field : innerClassNode.fields) {
                     thisRedirectSet.addRedirect(parseFieldRedirect(
                             field,
-                            Type.getType(classNameToDescriptor(srcClassName)),
-                            Type.getType(classNameToDescriptor(dstClassName)) // TODO: is this necessary?
+                            srcType,
+                            newOwner
                     ));
                 }
 
@@ -292,8 +301,8 @@ public class AnnotationParser {
 
                     thisRedirectSet.addRedirect(parseMethodRedirect(
                             method,
-                            Type.getType(classNameToDescriptor(srcClassName)),
-                            Type.getType(classNameToDescriptor(dstClassName)), // TODO: is this necessary?
+                            srcType,
+                            newOwner,
                             (innerClassNode.access & ACC_INTERFACE) == 0)
                     );
                 }
